@@ -106,8 +106,7 @@ export function createAgentSession({
 
     try {
       channel = bus.open(id);
-      const track = channel.track;
-      if (!track) throw new Error('the audio bus handed back no track');
+      if (!channel.track) throw new Error('the audio bus handed back no track');
 
       const earlier = prior(turns, id);
       const secret = await fetchClientSecret({
@@ -125,8 +124,14 @@ export function createAgentSession({
       audioEl.autoplay = true;
 
       call = await connect({
+        /**
+         * Not a microphone: the bus's own stream, which carries silence until a
+         * gate opens the other lectern onto it. It has to be the real
+         * MediaStream — `addTrack` takes the stream itself, and refuses
+         * anything that merely has the track hanging off it.
+         */
         secret: secret.value,
-        micStream: { getAudioTracks: () => [track] },
+        micStream: channel.stream,
         onEvent: events.handle,
         onTrack: (stream) => {
           if (abandoned()) return;

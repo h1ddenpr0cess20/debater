@@ -110,11 +110,28 @@ describe('createControls', () => {
     status.phase = 'running';
     controls.sync();
     assert.equal(page.$('#stop').disabled, false);
-    assert.equal(page.$('#pause').textContent, 'pause');
+    assert.equal(page.$('#pause').disabled, false);
+    assert.equal(page.$('#pause').getAttribute('aria-pressed'), 'false');
 
+    /** The button is a glyph, so what it says it does lives in the label. */
     status.phase = 'paused';
     controls.sync();
-    assert.equal(page.$('#pause').textContent, 'resume');
+    assert.equal(page.$('#pause').getAttribute('aria-pressed'), 'true');
+    assert.match(page.$('#pause').getAttribute('aria-label'), /carry on/i);
+  });
+
+  it('offers the caps as a short list rather than a spinner', () => {
+    for (const sel of ['#cap-turns', '#cap-minutes']) {
+      assert.equal(page.$(sel).tagName, 'SELECT');
+      assert.ok(page.$$(`${sel} option`).length > 3, `${sel} has nothing to pick from`);
+    }
+  });
+
+  it('finds room in the list for a cap nobody thought of', () => {
+    controls.setCatalog({ ...CATALOG, caps: { turns: 7, seconds: 660 } });
+    assert.equal(page.$('#cap-turns').value, '7');
+    assert.equal(page.$('#cap-minutes').value, '11');
+    assert.deepEqual(controls.caps(), { turns: 7, seconds: 660 });
   });
 
   it('locks the model and the voices once the calls are up', () => {
@@ -129,8 +146,10 @@ describe('createControls', () => {
   it('shows the microphone as open when it is', () => {
     status.mic = true;
     controls.sync();
-    assert.equal(page.$('#mic').classList.contains('live'), true);
     assert.equal(page.$('#mic').getAttribute('aria-pressed'), 'true');
+    status.mic = false;
+    controls.sync();
+    assert.equal(page.$('#mic').getAttribute('aria-pressed'), 'false');
   });
 
   it('toggles the cut-ins, and says which way it went', () => {

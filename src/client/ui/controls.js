@@ -25,6 +25,22 @@ function option(doc, label, value = label) {
 }
 
 /**
+ * Picks a value in a `<select>`, adding it if the list does not have it. The
+ * caps are a short list of sensible numbers rather than a spinner, and a server
+ * configured with a number nobody thought of still has to be selectable.
+ */
+function pick(select, value, label) {
+  const wanted = String(value);
+  if (![...select.options].some((o) => o.value === wanted)) {
+    select.append(option(select.ownerDocument, label(value), wanted));
+    [...select.options]
+      .sort((a, b) => Number(a.value) - Number(b.value))
+      .forEach((o) => select.append(o));
+  }
+  select.value = wanted;
+}
+
+/**
  * The bar along the bottom: the moderator's microphone, the one field they
  * type into, the three buttons that decide whether the debate is happening at
  * all, and the limits on how long it may.
@@ -82,13 +98,15 @@ export function createControls({
       ? 'What are they arguing about?'
       : 'Put a question to them, or name one of them…';
 
+    const held = phase === 'paused';
     pauseEl.disabled = !live;
-    pauseEl.textContent = phase === 'paused' ? 'resume' : 'pause';
-    pauseEl.setAttribute('aria-pressed', String(phase === 'paused'));
+    pauseEl.setAttribute('aria-pressed', String(held));
+    pauseEl.setAttribute('aria-label', held ? 'Carry on' : 'Pause the debate');
+    pauseEl.title = held ? 'Resume (space)' : 'Pause (space)';
     stopEl.disabled = idle;
 
     micEl.disabled = unavailable || busy;
-    micEl.classList.toggle('live', Boolean(mic));
+    /** `aria-pressed` is the state and the styling hook both — one source. */
     micEl.setAttribute('aria-pressed', String(Boolean(mic)));
     micEl.setAttribute('aria-label', mic ? 'Close the moderator microphone' : 'Open the moderator microphone');
 
@@ -214,8 +232,8 @@ export function createControls({
       }
 
       if (limits) {
-        turnsEl.value = String(limits.turns);
-        minutesEl.value = String(Math.max(1, Math.round(limits.seconds / MINUTE)));
+        pick(turnsEl, limits.turns, (n) => `${n} turns`);
+        pick(minutesEl, Math.max(1, Math.round(limits.seconds / MINUTE)), (n) => `${n} min`);
       }
 
       sync();

@@ -58,10 +58,24 @@
 
     <input id="topic" type="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="go"
            placeholder="What are they arguing about?" aria-label="The motion">
-    <button id="shuffle" class="chip" type="button" aria-label="Pick a motion for me">pick one</button>
+
+    <button id="shuffle" class="ghost chip" type="button" aria-label="Pick a motion for me">pick one</button>
     <button id="start" type="submit">debate</button>
-    <button id="pause" class="chip" type="button" aria-pressed="false" disabled>pause</button>
-    <button id="stop" class="chip" type="button" disabled>stop</button>
+
+    <button id="pause" class="round" type="button" aria-pressed="false" disabled
+            aria-label="Pause the debate" title="Pause (space)">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+        <g class="bars"><path d="M5.6 3v9M9.4 3v9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></g>
+        <path class="play" d="M4.6 3.2 12 7.5l-7.4 4.3z" fill="currentColor"/>
+      </svg>
+    </button>
+
+    <button id="stop" class="round" type="button" disabled
+            aria-label="Hang both calls up" title="Stop (esc)">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+        <rect x="3.6" y="3.6" width="7.8" height="7.8" rx="1.6" fill="currentColor"/>
+      </svg>
+    </button>
   </div>
 
   <div id="options">
@@ -69,12 +83,26 @@
     <div id="voices"></div>
     <button id="heckle" class="chip" type="button" aria-pressed="true"
             aria-label="Whether they may talk over each other">cut-ins on</button>
-    <label class="cap chip">turns
-      <input id="cap-turns" type="number" min="2" max="60" step="1" value="12" aria-label="Turn limit">
-    </label>
-    <label class="cap chip">min
-      <input id="cap-minutes" type="number" min="1" max="60" step="1" value="8" aria-label="Time limit in minutes">
-    </label>
+    <select id="cap-turns" class="chip cap" aria-label="Turn limit">
+      <option value="4">4 turns</option>
+      <option value="6">6 turns</option>
+      <option value="8">8 turns</option>
+      <option value="10">10 turns</option>
+      <option value="12" selected>12 turns</option>
+      <option value="16">16 turns</option>
+      <option value="20">20 turns</option>
+      <option value="30">30 turns</option>
+    </select>
+    <select id="cap-minutes" class="chip cap" aria-label="Time limit">
+      <option value="2">2 min</option>
+      <option value="4">4 min</option>
+      <option value="6">6 min</option>
+      <option value="8" selected>8 min</option>
+      <option value="12">12 min</option>
+      <option value="16">16 min</option>
+      <option value="20">20 min</option>
+      <option value="30">30 min</option>
+    </select>
   </div>
 </form>
 

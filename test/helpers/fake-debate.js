@@ -65,33 +65,51 @@ export function fakeAgent(id, name) {
   };
 }
 
-/** The wiring, as a record of which gates are open. */
+/**
+ * The wiring, as a record of which gates are open.
+ *
+ * Strict about channels that were never opened, exactly like the real one: a
+ * gate has to have something to open onto, and a forgiving fake here is a fake
+ * that lets the page ship saying "connecting" for ever.
+ */
 export function fakeBus() {
   const gates = new Map();
   const levels = new Map();
   const tracks = new Map();
   const opened = new Set();
 
+  const channel = (id) => {
+    if (!opened.has(id)) throw new Error(`no audio channel called ${id}`);
+    return id;
+  };
+
   return {
     gates,
     levels,
     tracks,
+    opened,
     resumed: false,
 
     async resume() { this.resumed = true; },
     open(id) { opened.add(id); return { id }; },
     get(id) { return opened.has(id) ? { id } : null; },
 
-    relay(from, to, on) { gates.set(`${from}>${to}`, Boolean(on)); },
-    open_(from, to) { return gates.get(`${from}>${to}`) === true; },
+    relay(from, to, on) { gates.set(`${channel(from)}>${channel(to)}`, Boolean(on)); },
+    isOpen(from, to) { return gates.get(`${from}>${to}`) === true; },
     silence() { for (const key of gates.keys()) gates.set(key, false); },
-    live(id, on) { tracks.set(id, Boolean(on)); },
+    /** The real one shrugs at a call that has not come up yet. */
+    live(id, on) { if (opened.has(id)) tracks.set(id, Boolean(on)); },
     level(id) { return levels.get(id) ?? 0; },
     say(id, level) { levels.set(id, level); },
   };
 }
 
-/** A microphone that is whatever the test says it is. */
-export function fakeModerator({ open = true, live = false } = {}) {
+/**
+ * A microphone that is whatever the test says it is. Opening it opens a channel
+ * on the bus, because that is what the real one does before it says it is open.
+ */
+export function fakeModerator(bus, { open = true, live = false } = {}) {
+  if (open) bus.open('moderator');
   return { id: 'moderator', name: 'You', open, live };
 }
+

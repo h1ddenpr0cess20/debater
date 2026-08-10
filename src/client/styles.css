@@ -263,32 +263,6 @@ three-d-stage {
   gap: 8px;
 }
 
-/** The moderator's microphone. Off is a slashed mic; on glows with your voice. */
-#mic {
-  --level: 0;
-  flex: none;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  touch-action: manipulation;
-  user-select: none;
-  -webkit-user-select: none;
-}
-#mic svg { display: block; }
-#mic .slash { opacity: 1; }
-#mic.live .slash { opacity: 0; }
-#mic.live {
-  background: var(--listening);
-  border-color: transparent;
-  color: var(--void);
-  box-shadow: 0 0 0 calc(2px + var(--level) * 8px) color-mix(in srgb, var(--listening) 22%, transparent);
-}
-#mic.live:hover { background: var(--listening); color: var(--void); }
-#mic[data-busy] { opacity: .5; }
-
 #topic {
   flex: 1;
   min-width: 0;
@@ -300,37 +274,105 @@ three-d-stage {
   font: 400 15px/1.4 var(--sans);
 }
 #topic::placeholder { color: rgba(255, 255, 255, .32); }
-#topic:focus { outline: none; }
+/**
+ * The field is focused on arrival, and a box drawn round it on arrival is
+ * noise: the caret says where you are, and the bar brightens around it.
+ */
+#topic:focus, #topic:focus-visible { outline: none; }
 #topic:disabled { cursor: default; opacity: .6; }
 
-#controls button {
+/**
+ * The buttons in the bar, carried over from the source apps: a circle the size
+ * of a fingertip, a soft fill, and colour only when it means something. The
+ * microphone is the one that was already right — this is that button.
+ */
+#mic, #controls .round {
+  --level: 0;
   appearance: none;
   cursor: pointer;
   flex: none;
-  padding: 10px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  background: rgba(255, 255, 255, .06);
-  color: rgba(255, 255, 255, .62);
-  transition: background .2s, color .2s, border-color .2s, opacity .2s;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .09);
+  border: 0;
+  color: rgba(255, 255, 255, .7);
+  transition: background .25s, color .25s, box-shadow .25s, transform .1s;
+  /** Tapped and held: no callout, no selection, no zoom. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-#controls button:hover { background: rgba(255, 255, 255, .14); color: var(--ink); }
-#controls button:disabled { opacity: .32; cursor: default; }
-#controls button:disabled:hover { background: rgba(255, 255, 255, .06); color: rgba(255, 255, 255, .62); }
+#mic:hover, #controls .round:hover { background: rgba(255, 255, 255, .16); color: var(--ink); }
+#mic:active, #controls .round:active { transform: scale(.94); }
+#mic svg, #controls .round svg { display: block; }
+#mic:disabled, #controls .round:disabled { opacity: .35; cursor: default; }
+#mic:disabled:hover, #controls .round:disabled:hover {
+  background: rgba(255, 255, 255, .09);
+  color: rgba(255, 255, 255, .7);
+}
 
+/** Off is a slashed microphone; on is lit, and breathes with your voice. */
+#mic .slash { opacity: 1; }
+#mic[aria-pressed="true"] .slash { opacity: 0; }
+#mic[aria-pressed="true"] {
+  background: var(--speaking);
+  color: var(--void);
+  box-shadow: 0 0 0 calc(4px + var(--level) * 7px) rgba(242, 199, 119, .14);
+}
+#mic[aria-pressed="true"]:hover { background: var(--speaking); color: var(--void); }
+#mic[data-busy] { opacity: .5; cursor: default; }
+
+/** Pause shows what pressing it does: two bars, or a triangle to come back. */
+#pause .play { opacity: 0; }
+#pause[aria-pressed="true"] .play { opacity: 1; }
+#pause[aria-pressed="true"] .bars { opacity: 0; }
+#pause[aria-pressed="true"] {
+  background: var(--speaking);
+  color: var(--void);
+  box-shadow: 0 0 0 4px rgba(242, 199, 119, .14);
+}
+#pause[aria-pressed="true"]:hover { background: var(--speaking); color: var(--void); }
+
+#stop:not(:disabled) { color: #ff9b9b; }
+#stop:not(:disabled):hover { background: rgba(255, 155, 155, .18); color: #ffc4c4; }
+
+/** The one that starts things: the only filled button in the bar. */
 #start {
+  appearance: none;
+  cursor: pointer;
+  flex: none;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--ink);
+  color: var(--void);
   font: 500 11px/1 var(--mono);
   letter-spacing: .12em;
   text-transform: uppercase;
-  background: var(--ink);
-  border-color: transparent;
-  color: var(--void);
+  transition: opacity .2s, transform .1s;
 }
-#start:hover { background: #ffffff; color: var(--void); }
-#start:disabled:hover { background: var(--ink); color: var(--void); }
+#start:hover { opacity: .86; }
+#start:active { transform: scale(.97); }
+#start:disabled { opacity: .3; cursor: default; }
 
-#pause[aria-pressed="true"] { color: var(--speaking); border-color: rgba(242, 199, 119, .45); }
-#shuffle[hidden] { display: none; }
+/** And the one that is barely a button at all. */
+#controls .ghost {
+  appearance: none;
+  cursor: pointer;
+  flex: none;
+  padding: 10px 4px;
+  background: none;
+  border: 0;
+  color: rgba(255, 255, 255, .38);
+  transition: color .2s;
+}
+#controls .ghost:hover { color: rgba(255, 255, 255, .78); }
+#controls .ghost[hidden] { display: none; }
 
 #heckle {
   appearance: none;
@@ -342,10 +384,9 @@ three-d-stage {
   color: rgba(255, 255, 255, .6);
   transition: color .2s, border-color .2s;
 }
+#heckle:hover { border-color: rgba(255, 255, 255, .28); }
 #heckle[aria-pressed="false"] { color: rgba(255, 255, 255, .28); }
 #heckle[aria-pressed="true"] { color: var(--speaking); border-color: rgba(242, 199, 119, .38); }
-#stop:not(:disabled) { color: #ff9b9b; border-color: rgba(255, 155, 155, .35); }
-#stop:not(:disabled):hover { background: rgba(255, 155, 155, .16); color: #ffc4c4; }
 
 #options {
   display: flex;
@@ -355,7 +396,7 @@ three-d-stage {
   padding: 0 2px;
 }
 
-#model, .cap select, .voice select {
+#model, .cap, .voice select {
   appearance: none;
   cursor: pointer;
   min-width: 0;
@@ -371,10 +412,14 @@ three-d-stage {
   text-overflow: ellipsis;
   transition: color .2s, border-color .2s;
 }
-#model { flex: 1 1 160px; max-width: 220px; }
-#model:hover, .voice select:hover { color: rgba(255, 255, 255, .9); border-color: rgba(255, 255, 255, .28); }
-#model:focus, .voice select:focus { outline: none; border-color: rgba(255, 255, 255, .4); }
-#model option, .voice select option {
+#model { flex: 1 1 150px; max-width: 210px; }
+#model:hover, .cap:hover, .voice select:hover {
+  color: rgba(255, 255, 255, .9);
+  border-color: rgba(255, 255, 255, .28);
+}
+#model:focus, .cap:focus, .voice select:focus { outline: none; border-color: rgba(255, 255, 255, .4); }
+#model:disabled, .cap:disabled { opacity: .45; cursor: default; }
+#model option, .cap option, .voice select option {
   background: var(--panel);
   color: var(--ink);
   letter-spacing: normal;
@@ -397,30 +442,6 @@ three-d-stage {
   background-color: transparent;
   padding-left: 0;
 }
-
-.cap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  color: rgba(255, 255, 255, .34);
-}
-.cap input {
-  width: 3.4ch;
-  appearance: textfield;
-  -moz-appearance: textfield;
-  padding: 9px 0;
-  background: none;
-  border: 0;
-  color: var(--ink);
-  font: 500 12px/1 var(--mono);
-}
-.cap input::-webkit-outer-spin-button,
-.cap input::-webkit-inner-spin-button { appearance: none; margin: 0; }
-.cap input:focus { outline: none; }
-.cap input:disabled { opacity: .6; }
 
 /* ── panels ──────────────────────────────────────────────────────────────── */
 
@@ -676,21 +697,31 @@ three-d-stage {
 
   /* The microphone keeps the field company; the buttons take the next line. */
   #motion-row { flex-wrap: wrap; }
-  #topic { flex: 1 1 55%; }
-  #shuffle, #start, #pause, #stop { flex: 1 1 auto; }
+  #topic { flex: 1 1 100%; order: -1; padding: 6px; }
+  #shuffle { margin-right: auto; }
   #options { justify-content: space-between; }
   #model { flex: 1 0 100%; max-width: none; }
 }
 
 @media (pointer: coarse) {
   #tabs button { padding: 13px 15px; }
-  #controls button { padding: 12px 15px; }
+  #mic, #controls .round { width: 44px; height: 44px; }
+  #start { padding: 13px 18px; }
   #tabs button:hover { color: rgba(255, 255, 255, .6); border-color: rgba(255, 255, 255, .14); }
+  #mic:hover, #controls .round:hover {
+    background: rgba(255, 255, 255, .09);
+    color: rgba(255, 255, 255, .7);
+  }
+  #mic[aria-pressed="true"]:hover, #pause[aria-pressed="true"]:hover {
+    background: var(--speaking);
+    color: var(--void);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   #phase, #motion, #notice, .lectern, .lectern .caption, #controls,
-  #controls button, #model, .voice select, #tabs button {
+  #mic, #controls .round, #start, #controls .ghost, #heckle,
+  #model, .cap, .voice select, #tabs button {
     transition-duration: .01ms;
   }
 }

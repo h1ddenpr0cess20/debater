@@ -9,7 +9,7 @@ import { withGlobals } from '../helpers/dom.js';
  * The director runs off an animation frame and a clock, so the tests own both:
  * `tick()` is one frame, and time only moves when a test moves it.
  */
-function harness({ caps = {}, moderator = null, chance = () => 1 } = {}) {
+function harness({ caps = {}, mic = null, chance = () => 1 } = {}) {
   let frame = null;
   let at = 1_000_000;
 
@@ -19,6 +19,7 @@ function harness({ caps = {}, moderator = null, chance = () => 1 } = {}) {
   });
 
   const bus = fakeBus();
+  const moderator = mic ? fakeModerator(bus, mic) : null;
   const egg = fakeAgent('egg', 'Marc');
   const potato = fakeAgent('potato', 'Tater');
   const events = [];
@@ -39,6 +40,7 @@ function harness({ caps = {}, moderator = null, chance = () => 1 } = {}) {
   return {
     director,
     bus,
+    moderator,
     egg,
     potato,
     events,
@@ -66,6 +68,33 @@ describe('a debate', () => {
     await h.director.start({ topic: '   ' });
     assert.equal(h.director.phase, 'idle');
     assert.match(h.seen('error')[0].message, /argue about/);
+  });
+
+  it('opens both ends of the wiring before it dials either call', async () => {
+    /**
+     * A peer connection is handed its track at the handshake, so the channel
+     * has to exist first. Getting this the wrong way round left the page
+     * saying "connecting" for ever, with the failure swallowed.
+     */
+    let openedWhenDialled = null;
+    const watch = h.egg.start.bind(h.egg);
+    h.egg.start = async (options) => {
+      openedWhenDialled = [...h.bus.opened].sort();
+      return watch(options);
+    };
+
+    await h.director.start({ topic: 'rent control' });
+
+    assert.deepEqual(openedWhenDialled, ['egg', 'potato']);
+    assert.equal(h.director.phase, 'running');
+  });
+
+  it('says what went wrong rather than sitting on "connecting"', async () => {
+    h.potato.start = async () => { throw new Error('the mint refused'); };
+    await h.director.start({ topic: 'rent control' });
+
+    assert.equal(h.director.phase, 'over');
+    assert.match(h.seen('error').at(-1).message, /the mint refused/);
   });
 
   it('dials both lecterns with the motion', async () => {
@@ -96,12 +125,12 @@ describe('a debate', () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.speak();
 
-    assert.equal(h.bus.open_('egg', 'potato'), true);
-    assert.equal(h.bus.open_('potato', 'egg'), false);
+    assert.equal(h.bus.isOpen('egg', 'potato'), true);
+    assert.equal(h.bus.isOpen('potato', 'egg'), false);
 
     h.potato.speak();
-    assert.equal(h.bus.open_('potato', 'egg'), true);
-    assert.equal(h.bus.open_('egg', 'potato'), false);
+    assert.equal(h.bus.isOpen('potato', 'egg'), true);
+    assert.equal(h.bus.isOpen('egg', 'potato'), false);
   });
 
   it('waits for the audio to run out before calling a turn over', async () => {
@@ -172,7 +201,7 @@ describe('pausing', () => {
     h.director.pause();
 
     assert.equal(h.director.phase, 'paused');
-    assert.equal(h.bus.open_('egg', 'potato'), false);
+    assert.equal(h.bus.isOpen('egg', 'potato'), false);
     assert.equal(h.egg.cancels, 1);
     assert.equal(h.bus.tracks.get('egg'), false);
     assert.equal(h.bus.tracks.get('potato'), false);
@@ -259,7 +288,7 @@ describe('cutting in', () => {
 
     const [cut] = h.seen('interrupt');
     assert.deepEqual(cut, { id: 'potato', over: 'egg' });
-    assert.equal(h.bus.open_('potato', 'egg'), true, 'the speaker cannot hear the objection');
+    assert.equal(h.bus.isOpen('potato', 'egg'), true, 'the speaker cannot hear the objection');
     assert.match(h.potato.asks.at(-1).instructions, /Cut in now/);
   });
 
@@ -289,8 +318,8 @@ describe('the moderator', () => {
   let mic;
 
   beforeEach(() => {
-    mic = fakeModerator({ open: true, live: false });
-    h = harness({ moderator: mic });
+    h = harness({ mic: { open: true, live: false } });
+    mic = h.moderator;
   });
 
   afterEach(() => {
@@ -304,8 +333,8 @@ describe('the moderator', () => {
     mic.live = true;
     h.director.micChanged();
 
-    assert.equal(h.bus.open_('moderator', 'egg'), true);
-    assert.equal(h.bus.open_('moderator', 'potato'), true);
+    assert.equal(h.bus.isOpen('moderator', 'egg'), true);
+    assert.equal(h.bus.isOpen('moderator', 'potato'), true);
   });
 
   it('takes the floor off both of them once you actually say something', async () => {
@@ -317,7 +346,7 @@ describe('the moderator', () => {
     h.tick();
 
     assert.equal(h.director.floor, 'moderator');
-    assert.equal(h.bus.open_('egg', 'potato'), false, 'they are still talking to each other');
+    assert.equal(h.bus.isOpen('egg', 'potato'), false, 'they are still talking to each other');
   });
 
   it('gives a typed line to both of them and asks one of them to take it', async () => {

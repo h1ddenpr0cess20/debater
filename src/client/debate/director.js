@@ -142,7 +142,8 @@ export function createDirector({
   }
 
   function micRoute() {
-    if (!moderator?.open) return;
+    /** No microphone, or one whose channel is not on the bus yet: nothing to route. */
+    if (!moderator?.open || !bus.get(MODERATOR)) return;
     for (const id of order) bus.relay(MODERATOR, id, Boolean(moderator.live));
   }
 
@@ -400,11 +401,26 @@ export function createDirector({
     if (!topic) return emit('error', { message: 'give them something to argue about first' });
 
     setPhase('connecting');
-    await bus.resume();
-    for (const id of order) bus.live(id, true);
-
     const resumed = earlier.length > 0;
-    await Promise.all(agents.map((agent) => agent.start({ topic, turns: earlier, resumed })));
+
+    try {
+      await bus.resume();
+      /** Both ends of the wiring exist before either call does: a peer
+       *  connection is handed its track at the handshake, and the gates
+       *  between them have to have something to open onto. */
+      for (const id of order) {
+        bus.open(id);
+        bus.live(id, true);
+      }
+
+      await Promise.all(agents.map((agent) => agent.start({ topic, turns: earlier, resumed })));
+    } catch (err) {
+      /** Whatever went wrong dialling, it is not a debate — say so and hang up
+       *  rather than leaving the page reading "connecting" for ever. */
+      emit('error', { message: err?.message ?? String(err) });
+      stop('never got off the ground');
+      return;
+    }
 
     if (!agents.every((agent) => agent.connected)) {
       stop('one of them never came up');

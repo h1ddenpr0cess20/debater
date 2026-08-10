@@ -69,6 +69,9 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
         source: null,
         analyser: null,
         gates: new Map(),
+        /** The real MediaStream, which is what a peer connection wants handed
+         *  to `addTrack` — an object that merely has the track on it is not one. */
+        get stream() { return feed?.stream ?? null; },
         get track() { return feed?.stream.getAudioTracks()[0] ?? null; },
 
         /** Their voice, once the call is up: metered here, relayed by the gates. */
@@ -114,9 +117,14 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
       }
     },
 
-    /** Whether a debater's outbound track carries anything at all. */
+    /**
+     * Whether a debater's outbound track carries anything at all.
+     *
+     * Quiet about a channel that does not exist yet: this is called to make the
+     * room ready, and a call that has not come up has nothing to deaden.
+     */
     live(id, on) {
-      const track = channel(id).track;
+      const track = channels.get(id)?.track;
       if (track) track.enabled = Boolean(on);
     },
 
