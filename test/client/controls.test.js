@@ -229,16 +229,11 @@ describe('createControls', () => {
       assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
     });
 
-    it('still lists an engine there is no key for, saying what it wants', () => {
+    it('lists every provider the server named, whatever it said about keys', () => {
       controls.setCatalog(ONE_ENGINE);
-      assert.deepEqual(groups(), ['OpenAI Realtime', 'xAI Grok Voice — set XAI_API_KEY']);
-      assert.equal(page.$$('#model optgroup')[1].disabled, true);
+      assert.deepEqual(groups(), ['OpenAI Realtime', 'xAI Grok Voice']);
       assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
-    });
-
-    it('does not open on a model it has no key to dial', () => {
-      const chosen = controls.setCatalog({ ...ONE_ENGINE, engine: 'xai' });
-      assert.equal(chosen.engine, 'openai');
+      assert.equal(page.$$('#model option').every((o) => !o.disabled), true);
     });
 
     it('opens on the model the server named', () => {

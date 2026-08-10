@@ -103,22 +103,15 @@ export function createControls({
     for (const one of engines.values()) {
       if (!one.models.length) continue;
       const group = doc.createElement('optgroup');
-      /** An engine with no key is listed and greyed, saying what it wants —
-       *  leaving it out is how a whole provider goes missing with no clue why. */
-      group.label = one.ready ? one.label : `${one.label} — set ${one.key}`;
-      group.disabled = !one.ready;
+      group.label = one.label;
       for (const model of one.models) {
         const el = option(doc, model.display_name ?? model.id, model.id);
         el.dataset.engine = one.id;
-        el.disabled = !one.ready;
         group.append(el);
       }
       modelEl.append(group);
     }
   }
-
-  /** The first model that can actually be dialled, whoever runs it. */
-  const firstReady = () => [...modelEl.options].find((o) => !o.disabled)?.value ?? '';
 
   /** The engine behind whatever is selected, read off the option itself. */
   const selectedEngine = () => modelEl.selectedOptions[0]?.dataset.engine ?? '';
@@ -309,9 +302,9 @@ export function createControls({
 
       buildModels();
       const opening = engines.get(catalog.engine);
-      const start = opening?.ready && opening.models.some((m) => m.id === opening.model)
+      const start = opening?.models.some((m) => m.id === opening.model)
         ? opening.model
-        : firstReady();
+        : modelEl.options[0]?.value;
 
       engine = '';
       return { ...useModel(start), caps: caps() };
