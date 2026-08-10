@@ -7,6 +7,10 @@
 <meta name="description" content="Two voice agents — an egg and a potato — argue politics at each other across two podiums, each one hearing the other as if it were a person.">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Debater — two voice agents, two podiums</title>
+<style>
+/* Keep the caption layer above the WebGL canvas. The canvas is explicitly z-indexed. */
+#floor { position: relative; z-index: 1; }
+</style>
 </head>
 <body>
 <div id="top">
