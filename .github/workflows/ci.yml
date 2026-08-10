@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here writes to the repo.
+permissions:
+  contents: read
+
+# A new push to a PR makes the in-flight run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.12 is the floor in `engines`; 24 is what this is developed on.
+        node: ['22.12', '24']
+    name: test (node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # The proxy has to come up and serve the build it was just handed —
+      # a broken static path or a bad dist/ layout fails here rather than
+      # on someone's machine.
+      - name: Smoke test the built server
+        run: |
+          node src/server/index.js &
+          server=$!
+          trap 'kill $server' EXIT
+          for i in $(seq 1 40); do
+            curl -sf -o /dev/null "http://127.0.0.1:5173/" && break
+            sleep 0.25
+          done
+          curl -sf -o /dev/null -w 'index %{http_code}\n' "http://127.0.0.1:5173/" | tee /dev/stderr | grep -q 'index 200'
+          # No key in this job, so /api/* should say so rather than crash.
+          curl -s "http://127.0.0.1:5173/api/models" | grep -q 'OPENAI_API_KEY is not set'
+      # The phone path: --https has to generate a certificate and serve on it,
+      # since that is the only way the mic is reachable off localhost.
+      - name: Smoke test the LAN server over https
+        run: |
+          node src/server/index.js --https &
+          server=$!
+          trap 'kill $server' EXIT
+          for i in $(seq 1 40); do
+            curl -ksf -o /dev/null "https://127.0.0.1:5173/" && break
+            sleep 0.25
+          done
+          curl -ksf -o /dev/null -w 'index %{http_code}\n' "https://127.0.0.1:5173/" | tee /dev/stderr | grep -q 'index 200'
