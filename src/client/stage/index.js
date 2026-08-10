@@ -25,6 +25,23 @@ const TOE_IN = 0.34;
 /** How much room to leave around the two of them, whatever shape the window is. */
 const MARGIN = 1.04;
 
+/**
+ * The top slice of the frame the set is kept out of.
+ *
+ * That space is where the captions go. Keeping it clear in the camera is what
+ * puts the text above their heads instead of across their faces — and it costs
+ * nothing at runtime, where resizing the canvas to make room would re-frame
+ * the shot every time somebody started talking.
+ */
+const HEADROOM = 0.3;
+
+/**
+ * And the bottom strip, which is the control bar's. Reserving it is what keeps
+ * a lectern's feet out from behind the buttons on a phone, where the bar is two
+ * rows tall and the window is not.
+ */
+const FOOTROOM = 0.16;
+
 const ACCENT = { left: '#2f5d92', right: '#8e3232' };
 
 function buildFloor(THREE) {
@@ -146,10 +163,13 @@ export function buildHall({ stage, THREE }) {
     camera.updateMatrixWorld(true);
   }
 
-  function fits() {
+  /** Inside the frame, and clear of the strips the captions and the bar have. */
+  function fits(headroom, footroom) {
+    const ceiling = 1 - 2 * headroom;
+    const floor = -1 + 2 * footroom;
     return corners.every((corner) => {
       const ndc = scratch.copy(corner).project(camera);
-      return Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1;
+      return Math.abs(ndc.x) <= 1 && ndc.y >= floor && ndc.y <= ceiling;
     });
   }
 
@@ -165,10 +185,14 @@ export function buildHall({ stage, THREE }) {
    */
   function frame() {
     const half = Math.tan((camera.fov * Math.PI) / 360);
+    /** A short window has no room to give away; a tall one has plenty. */
+    const headroom = stage.clientHeight > 520 ? HEADROOM : HEADROOM / 2;
+    /** The bar wraps to two rows on a narrow one, and takes more of it. */
+    const footroom = stage.clientWidth < 720 ? FOOTROOM * 1.5 : FOOTROOM;
     let dist = Math.max(span.y / 2 / half, span.x / 2 / (half * (camera.aspect || 1)));
 
     place(dist);
-    for (let i = 0; i < 60 && !fits(); i += 1) {
+    for (let i = 0; i < 80 && !fits(headroom, footroom); i += 1) {
       dist *= 1.04;
       place(dist);
     }
