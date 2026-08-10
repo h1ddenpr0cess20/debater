@@ -1,0 +1,78 @@
+name: Patch opening handoff
+
+on:
+  push:
+    branches: [agent/fix-opening-handover]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch director handoff race
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/client/debate/director.js')
+          s = p.read_text()
+
+          old = '''    /** Already answering, or already asked and about to: one at a time. */
+    if (pending[id] || them.busy || them.state === 'speaking') return false;
+    queued[id] = null;
+'''
+          new = '''    /**
+     * A handoff can arrive while the target is still finishing a previous
+     * response. Dropping that ask leaves the debate with nobody owning the
+     * next turn, which is the intermittent post-opening stall. Normal turns
+     * queue; an interruption is deliberately not queued because it is only
+     * useful while the speaker is still talking.
+     */
+    if (pending[id] || them.busy || them.state === 'speaking') {
+      if (retry) queued[id] = { direction };
+      return false;
+    }
+    queued[id] = null;
+'''
+          if old not in s:
+              raise SystemExit('ask guard not found')
+          s = s.replace(old, new, 1)
+
+          old = '''  function handOver(to, { direction } = {}) {
+    clearTimeout(heardTimer);
+    if (heardIt[to]) return ask(to, { direction });
+
+    waitingOn = to;
+'''
+          new = '''  function handOver(to, { direction } = {}) {
+    clearTimeout(heardTimer);
+    const target = roster[to];
+    if (!target?.connected || phase !== 'running') return false;
+    /** Preserve the handoff if the target is still finishing an older answer. */
+    if (pending[to] || target.busy || target.state === 'speaking') {
+      queued[to] = { direction };
+      return true;
+    }
+    if (heardIt[to]) return ask(to, { direction });
+
+    waitingOn = to;
+'''
+          if old not in s:
+              raise SystemExit('handOver guard not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+
+      - name: Commit patch and remove patch workflow
+        run: |
+          rm .github/workflows/patch-opening-handoff.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/client/debate/director.js .github/workflows/patch-opening-handoff.yml
+          git commit -m 'Fix intermittent response handoff stall'
+          git push
