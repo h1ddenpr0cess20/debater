@@ -2,13 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { DEBATERS } from '../../src/server/personas.js';
-import {
-  createFloor,
-  historyItem,
-  priorTurns,
-  readCall,
-  sanitize,
-} from '../../src/server/xai/proxy.js';
+import { historyItem, priorTurns, readCall, sanitize } from '../../src/server/xai/proxy.js';
 import { settle, startApp } from '../helpers/app.js';
 import { startXaiStub } from '../helpers/xai-stub.js';
 
@@ -144,39 +138,6 @@ describe('historyItem', () => {
   });
 });
 
-describe('the floor', () => {
-  it('keeps a response the page asked for', () => {
-    const floor = createFloor();
-    floor.asked();
-    assert.equal(floor.created(), true);
-  });
-
-  it('refuses one nobody asked for', () => {
-    const floor = createFloor();
-    assert.equal(floor.created(), false);
-  });
-
-  it('counts them, so a second answer to one ask is refused', () => {
-    const floor = createFloor();
-    floor.asked();
-    assert.equal(floor.created(), true);
-    assert.equal(floor.created(), false);
-  });
-
-  it('does not bank asks a page could spend later', () => {
-    const floor = createFloor({ limit: 2 });
-    for (let i = 0; i < 10; i++) floor.asked();
-    assert.equal(floor.outstanding, 2);
-  });
-
-  it('forgets what it was owed once a response fails outright', () => {
-    const floor = createFloor();
-    floor.asked();
-    floor.reset();
-    assert.equal(floor.created(), false);
-  });
-});
-
 describe('the proxy', () => {
   let xai;
   let app;
@@ -279,31 +240,6 @@ describe('the proxy', () => {
     } finally {
       await other.close();
     }
-  });
-
-  it('hangs up on a response nobody asked for', async () => {
-    const client = await app.openSocket('?debater=egg');
-    await client.waitFor('proxy.ready');
-    const before = xai.received().length;
-
-    xai.send({ type: 'response.created', response: { id: 'resp_1' } });
-    await settle();
-
-    assert.deepEqual(xai.received().slice(before).map((f) => f.type), ['response.cancel']);
-  });
-
-  it('leaves a response the page asked for alone', async () => {
-    const client = await app.openSocket('?debater=egg');
-    await client.waitFor('proxy.ready');
-
-    client.send({ type: 'response.create' });
-    await settle();
-    const before = xai.received().length;
-
-    xai.send({ type: 'response.created', response: { id: 'resp_2' } });
-    await settle();
-
-    assert.deepEqual(xai.received().slice(before), []);
   });
 
   describe('a debate picked back up', () => {

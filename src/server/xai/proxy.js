@@ -58,13 +58,6 @@ const HISTORY_CHARS = 6000;
 const TOPIC_CHARS = 400;
 
 /**
- * Which frames from xAI are worth parsing on the way past. Everything else is
- * forwarded as bytes — audio deltas are most of the traffic and the largest, and
- * none of this is worth a JSON.parse of every one of them.
- */
-const INSPECT = /"(response\.created|response\.done)"/;
-
-/**
  * What the page sent, cut back to turns this will actually replay. The content
  * is text the model reads, so it is capped here as well as in the page — the
  * page is not the only thing that can open this socket.
@@ -160,56 +153,6 @@ export function readCall(url, config) {
   };
 }
 
-/**
- * The floor, kept honest.
- *
- * The session is dialled with turn detection that never creates a response, and
- * everything about this app rests on that holding: one lectern is asked to
- * answer, exactly one answers. This counts what the page asked for against what
- * came back, and hangs up on a response nobody asked for.
- *
- * It exists because the alternative is a silent failure. If that flag were ever
- * ignored upstream, both models would answer every sentence the other said, both
- * would answer the moderator at once, and the page — which has no way to tell a
- * response it asked for from one it did not — would carry on as though it were
- * driving. A cancelled response is a bad turn; two models talking over each
- * other for eight minutes is a bad app and a bill.
- */
-export function createFloor({ limit = 2 } = {}) {
-  let wanted = 0;
-
-  return {
-    /** The page asked for one. */
-    asked() {
-      wanted = Math.min(limit, wanted + 1);
-    },
-
-    /**
-     * One was created upstream. True if it is ours to keep — false means nobody
-     * asked, and the caller cancels it.
-     */
-    created() {
-      if (wanted === 0) return false;
-      wanted -= 1;
-      return true;
-    },
-
-    /**
-     * A response ended without ever being created — the frame was refused, or
-     * the call went down mid-handshake. Whatever the page was owed, it is not
-     * coming, and holding the credit would let the next unsolicited response
-     * through.
-     */
-    reset() {
-      wanted = 0;
-    },
-
-    get outstanding() {
-      return wanted;
-    },
-  };
-}
-
 export function createXaiProxy(config) {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -233,7 +176,6 @@ export function createXaiProxy(config) {
       headers: { authorization: `Bearer ${config.apiKey}` },
     });
 
-    const floor = createFloor();
     let pending = [];
     let history = [];
     let off = [];
@@ -249,32 +191,6 @@ export function createXaiProxy(config) {
         tools: buildTools(pickTools(config.tools, off)),
       }),
     });
-
-    const sendUp = (event) => {
-      if (upstream.readyState !== WebSocket.OPEN) return false;
-      upstream.send(JSON.stringify(event));
-      return true;
-    };
-
-    /** Everything the proxy needs to know from a frame it is only passing on. */
-    function inspect(text) {
-      let event;
-      try {
-        event = JSON.parse(text);
-      } catch {
-        return;
-      }
-
-      if (event.type === 'response.created') {
-        if (floor.created()) return;
-        console.warn(`xai: ${call.id} answered without being asked — cancelling`);
-        sendUp({ type: 'response.cancel' });
-        return;
-      }
-
-      /** A response that failed outright is one the page is no longer owed. */
-      if (event.type === 'response.done' && event.response?.status === 'failed') floor.reset();
-    }
 
     /**
      * An earlier debate, laid back down as items. It goes after the session
@@ -300,9 +216,6 @@ export function createXaiProxy(config) {
 
     upstream.on('message', (data, isBinary) => {
       if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
-      if (isBinary) return;
-      const text = data.toString();
-      if (INSPECT.test(text)) inspect(text);
     });
 
     upstream.on('error', (err) => {
@@ -348,7 +261,6 @@ export function createXaiProxy(config) {
 
       const event = sanitize(incoming);
       if (!event) return;
-      if (event.type === 'response.create') floor.asked();
 
       const frame = JSON.stringify(event);
       if (upstream.readyState === WebSocket.OPEN) upstream.send(frame);
