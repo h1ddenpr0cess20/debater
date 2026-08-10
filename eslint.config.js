@@ -37,7 +37,10 @@ export default [
   },
 
   {
-    files: ['src/server/**/*.js', 'test/**/*.js', 'vite.config.js', 'eslint.config.js'],
+    files: [
+      'src/server/**/*.js', 'test/**/*.js', 'scripts/**/*.js',
+      'vite.config.js', 'eslint.config.js',
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
