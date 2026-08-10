@@ -33,16 +33,15 @@ export function buildTools({ webSearch, xSearch, mcpServers } = {}) {
 /**
  * The session one lectern dials with.
  *
- * The turn detection is the same bargain the OpenAI engine strikes, for the same
- * reason: what arrives here is mostly another model's output — clean, and with
- * no half-finished human sentences to be clever about — the page needs to know
- * exactly when the far end has taken a turn in, and nobody answers on their own.
- * Two models that each decide when it is their turn answer the same sentence at
- * the same time and answer the moderator in chorus.
- *
- * `create_response: false` is the load-bearing one. The proxy does not take it
- * on trust — see `enforceFloor` in `proxy.js` — because a debate where the floor
- * is not the page's to give is not this app.
+ * Every field here is one the working single-agent app sends, in the shape it
+ * sends it, and that is the whole rule for this file. The port did not keep to
+ * it: it added `create_response: false` and `interrupt_response: true` to the
+ * turn detection because this app wants the floor to be the director's to give,
+ * and a debate then did nothing at all. Whatever xAI makes of a turn-detection
+ * block it does not recognise, it is not a session configured the way this asked
+ * for — so the two invented fields are gone, and who may answer is enforced in
+ * `proxy.js`, where it can be enforced against what actually comes back rather
+ * than asserted in a payload and hoped for.
  */
 export function sessionConfig({ voice, debater: self, topic, resumed, tools = [] } = {}) {
   return {
@@ -52,15 +51,9 @@ export function sessionConfig({ voice, debater: self, topic, resumed, tools = []
     reasoning: { effort: 'none' },
     turn_detection: {
       type: 'server_vad',
-      threshold: 0.4,
-      prefix_padding_ms: 300,
-      silence_duration_ms: 500,
-      create_response: false,
-      /**
-       * Being talked over does cut you off, which is what makes an interruption
-       * an interruption rather than two voices at once.
-       */
-      interrupt_response: true,
+      threshold: 0.7,
+      prefix_padding_ms: 333,
+      silence_duration_ms: 520,
     },
     audio: {
       input: {

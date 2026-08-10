@@ -46,6 +46,8 @@ export function createEventHandler({
   let responding = false;
   let transcript = '';
   let called = new Set();
+  /** The response now running, so samples from a cancelled one can be told apart. */
+  let current = null;
 
   function flush() {
     if (transcript) record({ role: 'assistant', content: transcript });
@@ -108,13 +110,21 @@ export function createEventHandler({
        * The far end has decided the incoming turn is over, and committed what
        * it heard to the conversation. That is the moment an answer can be
        * asked for: ask before it and the answer is to an empty room.
+       *
+       * Both spellings, because the director hands the floor over on this and
+       * on nothing else. The port listened only for `speech_stopped`; a session
+       * that says a turn ended by committing the buffer instead left every
+       * handover to time out, which reads from the room as the two of them
+       * ignoring each other.
        */
       case 'input_audio_buffer.speech_stopped':
+      case 'input_audio_buffer.committed':
         emit('speech', { started: false });
         setState('thinking');
         break;
 
       case 'response.created':
+        current = event.response?.id ?? null;
         setResponding(true);
         emit('pulse', 0.32);
         setState('thinking');
@@ -127,6 +137,13 @@ export function createEventHandler({
        */
       case 'response.output_audio.delta':
       case 'response.audio.delta': {
+        /**
+         * Audio from a response that is no longer the one running. The proxy
+         * cancels every answer this lectern gave without being asked, and a
+         * cancelled response has samples already in the air behind it — playing
+         * them puts a voice in the room that nobody handed the floor to.
+         */
+        if (current && event.response_id && event.response_id !== current) break;
         const samples = decodePCM(event.delta);
         if (samples) play(samples);
         setState('speaking');
@@ -138,9 +155,25 @@ export function createEventHandler({
       case 'response.output_text.delta':
       case 'response.text.delta':
         setState('speaking');
-        transcript += event.delta;
-        emit('text', event.delta);
+        transcript += event.delta ?? '';
+        emit('text', event.delta ?? '');
         break;
+
+      /**
+       * The same turn, sent whole rather than in pieces. What arrives is the
+       * transcript so far, not an addition to it, so it replaces what is held
+       * and the caption is emitted as the difference — the room reads a caption
+       * that grows, whichever way the far end chose to send it.
+       */
+      case 'response.output_audio_transcript.updated':
+      case 'response.output_text.updated': {
+        const whole = event.transcript ?? event.text ?? transcript;
+        const added = whole.startsWith(transcript) ? whole.slice(transcript.length) : whole;
+        transcript = whole;
+        setState('speaking');
+        if (added) emit('text', added);
+        break;
+      }
 
       /** What this lectern made of what it heard, while it is still hearing it. */
       case 'conversation.item.input_audio_transcription.updated':
@@ -200,6 +233,7 @@ export function createEventHandler({
       setResponding(false);
       transcript = '';
       called = new Set();
+      current = null;
     },
   };
 }

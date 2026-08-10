@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
 import { DEBATERS } from '../../src/server/personas.js';
-import { historyItem, priorTurns, readCall, sanitize } from '../../src/server/xai/proxy.js';
+import {
+  createFloor,
+  historyItem,
+  priorTurns,
+  readCall,
+  sanitize,
+} from '../../src/server/xai/proxy.js';
 import { settle, startApp } from '../helpers/app.js';
 import { startXaiStub } from '../helpers/xai-stub.js';
 
@@ -138,6 +144,39 @@ describe('historyItem', () => {
   });
 });
 
+describe('the floor', () => {
+  it('keeps a response the page asked for', () => {
+    const floor = createFloor();
+    floor.asked();
+    assert.equal(floor.created(), true);
+  });
+
+  it('refuses one nobody asked for', () => {
+    const floor = createFloor();
+    assert.equal(floor.created(), false);
+  });
+
+  it('counts them, so a second answer to one ask is refused', () => {
+    const floor = createFloor();
+    floor.asked();
+    assert.equal(floor.created(), true);
+    assert.equal(floor.created(), false);
+  });
+
+  it('does not bank asks a page could spend later', () => {
+    const floor = createFloor({ limit: 2 });
+    for (let i = 0; i < 10; i++) floor.asked();
+    assert.equal(floor.outstanding, 2);
+  });
+
+  it('forgets what it was owed once a response fails outright', () => {
+    const floor = createFloor();
+    floor.asked();
+    floor.reset();
+    assert.equal(floor.created(), false);
+  });
+});
+
 describe('the proxy', () => {
   let xai;
   let app;
@@ -178,10 +217,24 @@ describe('the proxy', () => {
     assert.deepEqual(named, ['web_search', 'x_search', 'mcp']);
   });
 
-  it('never lets either of them answer on their own', async () => {
+  /**
+   * The floor is the proxy's to hold, and the payload's job is to stay out of
+   * it. Asking for turn detection that never creates a response is what the
+   * port did, and a debate then did nothing at all — so the session says only
+   * what the working single-agent app says, and `createFloor` above is what
+   * makes sure exactly one lectern answers.
+   */
+  it('asks for turn detection in the shape that works, and invents nothing', async () => {
     const [first] = xai.received();
-    assert.equal(first.session.turn_detection.create_response, false);
-    assert.equal(first.session.turn_detection.interrupt_response, true);
+
+    assert.deepEqual(first.session.turn_detection, {
+      type: 'server_vad',
+      threshold: 0.7,
+      prefix_padding_ms: 333,
+      silence_duration_ms: 520,
+    });
+    assert.deepEqual(Object.keys(first.session.audio.input).sort(), ['format', 'transport']);
+    assert.deepEqual(first.session.audio.output.format, { type: 'audio/pcm', rate: 24000 });
   });
 
   it('puts the motion in the instructions, from the query and nowhere else', async () => {
@@ -240,6 +293,31 @@ describe('the proxy', () => {
     } finally {
       await other.close();
     }
+  });
+
+  it('hangs up on a response nobody asked for', async () => {
+    const client = await app.openSocket('?debater=egg');
+    await client.waitFor('proxy.ready');
+    const before = xai.received().length;
+
+    xai.send({ type: 'response.created', response: { id: 'resp_1' } });
+    await settle();
+
+    assert.deepEqual(xai.received().slice(before).map((f) => f.type), ['response.cancel']);
+  });
+
+  it('leaves a response the page asked for alone', async () => {
+    const client = await app.openSocket('?debater=egg');
+    await client.waitFor('proxy.ready');
+
+    client.send({ type: 'response.create' });
+    await settle();
+    const before = xai.received().length;
+
+    xai.send({ type: 'response.created', response: { id: 'resp_2' } });
+    await settle();
+
+    assert.deepEqual(xai.received().slice(before), []);
   });
 
   describe('a debate picked back up', () => {
