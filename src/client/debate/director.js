@@ -26,7 +26,7 @@ export const CAPS = {
 };
 
 /** Below this, for this long, whoever is talking has stopped. */
-const QUIET_LEVEL = 0.02;
+const QUIET_LEVEL = 0.05;
 const QUIET_MS = 900;
 
 /** A person pauses mid-sentence in a way a model does not. */
@@ -405,7 +405,7 @@ export function createDirector({
         usage[agent.id].output += used.output_tokens ?? 0;
       }
       /** They have answered; they may be asked again — and if something was
-       *  waiting on exactly that, it goes now. */
+       * waiting on exactly that, it goes now. */
       pending[agent.id] = false;
       const waiting = queued[agent.id];
       queued[agent.id] = null;
@@ -536,8 +536,8 @@ export function createDirector({
     try {
       await bus.resume();
       /** Both ends of the wiring exist before either call does: a peer
-       *  connection is handed its track at the handshake, and the gates
-       *  between them have to have something to open onto. */
+       * connection is handed its track at the handshake, and the gates on the
+       * bus have to have something to open onto. */
       for (const id of order) {
         bus.open(id);
         bus.live(id, true);
@@ -546,7 +546,7 @@ export function createDirector({
       await Promise.all(agents.map((agent) => agent.start({ topic, turns: earlier, resumed })));
     } catch (err) {
       /** Whatever went wrong dialling, it is not a debate — say so and hang up
-       *  rather than leaving the page reading "connecting" for ever. */
+       * rather than leaving the page reading "connecting" for ever. */
       emit('error', { message: err?.message ?? String(err) });
       stop('never got off the ground');
       return;
