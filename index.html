@@ -84,9 +84,11 @@
   </div>
 
   <div id="options">
-    <select id="engine" class="chip" aria-label="Engine" hidden></select>
+   <div class="opt-group">
     <select id="model" class="chip" aria-label="Model"><option>loading…</option></select>
     <div id="voices"></div>
+   </div>
+   <div class="opt-group" id="limits">
     <button id="heckle" class="chip" type="button" aria-pressed="true"
             aria-label="Whether they may talk over each other">cut-ins on</button>
     <select id="cap-turns" class="chip cap" aria-label="Turn limit">
@@ -109,6 +111,7 @@
       <option value="20">20 min</option>
       <option value="30">30 min</option>
     </select>
+   </div>
   </div>
 </form>
 

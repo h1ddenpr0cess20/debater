@@ -7,9 +7,11 @@ the two keys; nothing else has to be set.
 ## The engines
 
 Two lecterns can be run on either of two providers. Set the key for one, or set
-both and pick from the bar at the bottom of the page — the picker only appears
-when there is a choice to make, and it is disabled while a debate is up, because
-which engine a debate runs on is settled when the calls go out.
+both: the model picker in the bar at the bottom then lists every model this
+server can dial, grouped by whoever runs it, and picking one is what settles the
+provider. The voice pickers and the `tools` panel follow it. It is disabled while
+a debate is up, because which engine a debate runs on is settled when the calls
+go out.
 
 ```sh
 OPENAI_API_KEY=sk-...      # the OpenAI engine
@@ -45,10 +47,13 @@ each is read in and the model behind it.
 |---|---|
 | `EGG_VOICE` | Marc's OpenAI voice. Default `ash`. |
 | `POTATO_VOICE` | Tater's OpenAI voice. Default `cedar`. |
-| `OPENAI_REALTIME_MODEL` | What the model picker opens on. Default `gpt-realtime-2.1`. |
+| `OPENAI_REALTIME_MODEL` | Which OpenAI model the picker opens on. Default `gpt-realtime-2.1`. |
 | `EGG_XAI_VOICE` | Marc's xAI voice. Default `orion`. |
 | `POTATO_XAI_VOICE` | Tater's xAI voice. Default `atlas`. |
 | `XAI_MODEL` | The same, for xAI. Default `grok-voice-latest`. |
+
+`ENGINE` decides which of the two the picker opens on; after that it is whichever
+model you choose.
 
 The OpenAI voices are `ash`, `alloy`, `ballad`, `cedar`, `coral`, `echo`,
 `marin`, `sage`, `shimmer` and `verse`.

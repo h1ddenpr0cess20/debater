@@ -25,8 +25,12 @@ moderator's opening goes to both of them, and one is asked to start.
 ## Two engines
 
 The lecterns run on OpenAI Realtime or on xAI's Grok voice API. Set one key, or
-set both and pick from the bar at the bottom — the picker only shows up when
-there is a choice, and it is locked while a debate is up.
+set both and pick a model from the bar at the bottom: the list holds every model
+this server can dial, grouped by whoever runs it, and picking one is what decides
+the provider. There is no separate engine switch, because that was never a
+question worth asking on its own — you want a model, and the voices and tools
+follow it. With one key set it reads as an ordinary model picker, which is what
+it is.
 
 The personas, the floor, the caps and the log are the same either way. What
 differs is how a call is made, and it is the reason the xAI side is worth having:

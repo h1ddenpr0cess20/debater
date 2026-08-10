@@ -61,7 +61,6 @@ export function createControls({
   onMic,
   onToggle,
   onStop,
-  onEngineChange,
   onModelChange,
   onVoiceChange,
   onCaps,
@@ -75,7 +74,6 @@ export function createControls({
   const startEl = root.querySelector('#start');
   const pauseEl = root.querySelector('#pause');
   const stopEl = root.querySelector('#stop');
-  const engineEl = root.querySelector('#engine');
   const modelEl = root.querySelector('#model');
   const voicesEl = root.querySelector('#voices');
   const heckleEl = root.querySelector('#heckle');
@@ -89,51 +87,94 @@ export function createControls({
   /** The roster, kept so the voice pickers can be rebuilt for another engine. */
   let debaters = [];
   let engines = new Map();
+  let engine = '';
 
   /**
-   * The model and voice pickers, rebuilt for one engine.
+   * Every model this server can actually dial, whoever runs it.
    *
-   * Both lists belong to the engine rather than to the app — a Grok voice is not
-   * an OpenAI voice and neither will answer to the other's name — so switching
-   * engine throws both away and builds them again. Two debaters in the same
+   * There is no engine picker. Which provider a debate runs on is not a
+   * question worth asking on its own — it is decided by which model you pick,
+   * and the pickers either side of it follow. Grouping by provider is what
+   * makes that legible in one list; a server with one key set shows one group
+   * and reads as an ordinary model picker, which is what it is.
+   */
+  function buildModels() {
+    modelEl.replaceChildren();
+    for (const one of engines.values()) {
+      if (!one.ready || !one.models.length) continue;
+      const group = doc.createElement('optgroup');
+      group.label = one.label;
+      for (const model of one.models) {
+        const el = option(doc, model.display_name ?? model.id, model.id);
+        /** Whose model it is rides on the option rather than inside its value:
+         *  the value stays the plain model id, which is what gets dialled. */
+        el.dataset.engine = one.id;
+        group.append(el);
+      }
+      modelEl.append(group);
+    }
+  }
+
+  /** The engine behind whatever is selected, read off the option itself. */
+  const selectedEngine = () => modelEl.selectedOptions[0]?.dataset.engine ?? '';
+
+  /**
+   * The voice pickers, rebuilt for one engine.
+   *
+   * They belong to the engine rather than to the app — a Grok voice is not an
+   * OpenAI voice and neither will answer to the other's name — so changing
+   * engine throws them away and builds them again. Two debaters in the same
    * voice is the fastest way to make a debate unlistenable, so there is one
    * picker per lectern rather than one shared.
    */
-  function useEngine(id) {
-    const engine = engines.get(id);
-    const models = engine?.models ?? [];
-    const voices = engine?.voices ?? [];
-
-    modelEl.replaceChildren(...models.map((m) => option(doc, m.display_name ?? m.id, m.id)));
-    const chosen = models.some((m) => m.id === engine.model) ? engine.model : models[0]?.id ?? '';
-    modelEl.value = chosen;
-
+  function buildVoices(one) {
+    const voices = one?.voices ?? [];
     voicesEl.replaceChildren();
     voiceEls.clear();
+
     const picked = {};
-    for (const one of debaters) {
-      const wanted = engine?.voices_for?.[one.id];
+    for (const who of debaters) {
+      const wanted = one?.voices_for?.[who.id];
       const label = doc.createElement('label');
       label.className = 'voice chip';
-      label.dataset.debater = one.id;
-      label.style.setProperty('--accent', one.accent);
-      label.append(one.name);
+      label.dataset.debater = who.id;
+      label.style.setProperty('--accent', who.accent);
+      label.append(who.name);
 
       const select = doc.createElement('select');
-      select.id = `voice-${one.id}`;
-      select.setAttribute('aria-label', `${one.name}'s voice`);
+      select.id = `voice-${who.id}`;
+      select.setAttribute('aria-label', `${who.name}'s voice`);
       select.replaceChildren(...voices.map((v) => option(doc, v)));
       select.value = voices.includes(wanted) ? wanted : voices[0];
-      select.addEventListener('change', () => onVoiceChange(one.id, select.value));
+      select.addEventListener('change', () => onVoiceChange(who.id, select.value));
 
       label.append(select);
       voicesEl.append(label);
-      voiceEls.set(one.id, select);
-      picked[one.id] = select.value;
+      voiceEls.set(who.id, select);
+      picked[who.id] = select.value;
     }
+    return picked;
+  }
+
+  /**
+   * Settle on a model. `changed` is whether that moved the debate to another
+   * provider, which is the caller's cue to build the two calls again — the
+   * voices and the tool switches here have already followed it.
+   */
+  function useModel(model) {
+    if (model != null) modelEl.value = model;
+    const one = engines.get(selectedEngine());
+    if (!one) return null;
+
+    const changed = one.id !== engine;
+    engine = one.id;
+
+    const voices = changed ? buildVoices(one) : Object.fromEntries(
+      [...voiceEls].map(([id, select]) => [id, select.value]),
+    );
 
     sync();
-    return { engine: id, model: chosen, voices: picked, switches: engine?.switches ?? [] };
+    return { engine, model: modelEl.value, voices, switches: one.switches ?? [], changed };
   }
 
   function sync() {
@@ -162,9 +203,8 @@ export function createControls({
     micEl.setAttribute('aria-label', mic ? 'Close the moderator microphone' : 'Open the moderator microphone');
 
     topicEl.disabled = unavailable;
-    /** Which engine a debate runs on is settled when the calls go out, so it is
-     *  a choice you make between debates rather than during one. */
-    engineEl.disabled = unavailable || !idle;
+    /** The model — and so the provider behind it — is settled when the calls go
+     *  out, so it is a choice you make between debates rather than during one. */
     modelEl.disabled = unavailable || !idle;
     turnsEl.disabled = !idle;
     minutesEl.disabled = !idle;
@@ -218,10 +258,7 @@ export function createControls({
     sync();
   });
 
-  modelEl.addEventListener('change', () => onModelChange(modelEl.value));
-
-  /** A different engine is a different set of calls: the page rebuilds around it. */
-  engineEl.addEventListener('change', () => onEngineChange(useEngine(engineEl.value)));
+  modelEl.addEventListener('change', () => onModelChange(useModel(modelEl.value)));
 
   heckleEl.addEventListener('click', () => {
     const on = heckleEl.getAttribute('aria-pressed') !== 'true';
@@ -255,35 +292,29 @@ export function createControls({
       micEl.style.setProperty('--level', String(Math.min(1, Math.max(0, level))));
     },
 
-    /**
-     * What the server offers.
-     *
-     * The engine picker is only shown when there is a choice to make: a server
-     * with one key set has one engine that can take a call, and a disabled
-     * dropdown next to the model is a question nobody asked.
-     */
+    /** What the server offers: every model it can dial, under its provider. */
     setCatalog(catalog) {
       debaters = catalog.debaters;
-
-      const usable = catalog.engines.filter((one) => one.ready);
-      engineEl.replaceChildren(...usable.map((one) => option(doc, one.label, one.id)));
-      engineEl.hidden = usable.length < 2;
-      engineEl.value = usable.some((one) => one.id === catalog.engine)
-        ? catalog.engine
-        : usable[0].id;
+      engines = new Map(catalog.engines.map((one) => [one.id, one]));
 
       if (catalog.caps) {
         pick(turnsEl, catalog.caps.turns, (n) => `${n} turns`);
         pick(minutesEl, Math.max(1, Math.round(catalog.caps.seconds / MINUTE)), (n) => `${n} min`);
       }
 
-      engines = new Map(catalog.engines.map((one) => [one.id, one]));
-      return { ...useEngine(engineEl.value), caps: caps() };
+      buildModels();
+      /** Whichever the server opens on, or the first thing in the list. */
+      const opening = engines.get(catalog.engine);
+      const start = opening?.ready && opening.models.some((m) => m.id === opening.model)
+        ? opening.model
+        : modelEl.options[0]?.value;
+
+      engine = '';
+      return { ...useModel(start), caps: caps() };
     },
 
     catalogUnavailable() {
       unavailable = true;
-      engineEl.hidden = true;
       modelEl.replaceChildren(option(doc, 'unavailable', ''));
       voicesEl.replaceChildren();
       sync();

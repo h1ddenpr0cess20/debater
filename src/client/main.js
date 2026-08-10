@@ -114,22 +114,29 @@ const controls = createControls({
   onHeckle: (on) => { if (director) director.heckling = on; },
 
   /**
-   * A different engine is a different pair of calls, dialled a different way, so
-   * both lecterns and the director in front of them are built again from
-   * scratch. Only between debates — the picker is disabled while one is up.
+   * A model, and with it a provider.
+   *
+   * There is no separate engine switch: picking a Grok model is what puts the
+   * debate on xAI. Most of the time that is just a new model on the two calls
+   * we already have. When it crosses providers it is a different pair of calls
+   * dialled a different way, so both lecterns and the director in front of them
+   * are built again — which is only safe because the picker is disabled while a
+   * debate is up.
    */
-  onEngineChange(chosen) {
-    director?.stop();
+  onModelChange(chosen) {
+    if (!chosen) return;
     model = chosen.model;
+
+    if (!chosen.changed) {
+      for (const agent of agents) agent.model = model;
+      return;
+    }
+
+    director?.stop();
     switches.setCatalog(chosen.switches);
     toolsPanel.render();
     build(chosen);
     hud.notice(`${chosen.engine === 'xai' ? 'xAI' : 'OpenAI'} — the next debate runs on it`);
-  },
-
-  onModelChange(next) {
-    model = next;
-    for (const agent of agents) agent.model = next;
   },
 
   onVoiceChange(id, voice) {

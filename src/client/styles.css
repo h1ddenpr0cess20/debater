@@ -44,6 +44,16 @@ three-d-stage {
   width: 100%;
   height: 100dvh;
   touch-action: none;
+  /**
+   * The room is the one thing in `#top` you can put a hand on.
+   *
+   * It lives in that stack so the captions can sit above it without the canvas
+   * resizing, and the stack is `pointer-events: none` so a caption never eats a
+   * click meant for the room. But `pointer-events` inherits, and the canvas is
+   * a descendant of it — which quietly took the orbit controls away with it.
+   * Nothing about being dragged moves the layout, so it takes them back.
+   */
+  pointer-events: auto;
 }
 
 .chip {
@@ -421,12 +431,33 @@ three-d-stage {
  * colour only on the one thing that is a switch.
  */
 #options .chip { text-transform: none; }
+
+/**
+ * Two groups, not five loose controls: what to run this on, and how long to let
+ * it run. They are what wraps, so a narrow window puts the limits under the
+ * model rather than breaking the row wherever it happens to run out — and a
+ * group keeps its own contents together, so `8 min` never ends up orphaned on a
+ * line of its own.
+ *
+ * This used to be one flat row with `margin-left: auto` on the switch to push
+ * the limits right. In a wrapping flex container that is a trap: the auto margin
+ * takes all the free space on the first line, so whatever follows it has none
+ * left and wraps, however wide the window is.
+ */
 #options {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px 4px;
+  justify-content: space-between;
+  gap: 2px 16px;
   padding: 2px 4px 0;
+}
+.opt-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  min-width: 0;
 }
 
 #model, .cap, .voice select {
@@ -487,7 +518,6 @@ three-d-stage {
 #heckle {
   appearance: none;
   cursor: pointer;
-  margin-left: auto;
   padding: 7px 9px;
   border: 0;
   border-radius: 8px;
@@ -762,7 +792,11 @@ three-d-stage {
   #motion-row { flex-wrap: wrap; }
   #topic { flex: 1 1 100%; order: -1; padding: 6px; }
   #shuffle { margin-right: auto; }
-  #options { justify-content: space-between; }
+  /** Not much room: the model takes the line, the two voices sit under it, and
+   *  the limits keep the line after that. */
+  #options { gap: 4px 10px; }
+  .opt-group { flex: 1 1 100%; }
+  #limits { justify-content: space-between; }
   #model { flex: 1 0 100%; max-width: none; }
 }
 
