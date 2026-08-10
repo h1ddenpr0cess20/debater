@@ -23,14 +23,32 @@ const arg = (name, fallback) => {
   return at === -1 ? fallback : args[at + 1];
 };
 
-const KEY = process.env.XAI_API_KEY;
-const URL_ = process.env.XAI_REALTIME_URL || 'wss://api.x.ai/v1/realtime';
+/**
+ * The key, from wherever it is. A probe that will not run because it wanted the
+ * variable spelled its way is a probe that has wasted your time instead of
+ * saving it, so this takes it on the command line as well, and says what it
+ * looked at when it finds nothing.
+ */
+const KEY = arg('key', process.env.XAI_API_KEY || process.env.XAI_KEY || process.env.GROK_API_KEY);
+const URL_ = arg('url', process.env.XAI_REALTIME_URL || 'wss://api.x.ai/v1/realtime');
 const MODEL = arg('model', process.env.XAI_MODEL || 'grok-voice-latest');
 const VOICE = arg('voice', 'atlas');
 const RATE = 24_000;
 
 if (!KEY) {
-  console.error('XAI_API_KEY is not set. Put it in .env or the environment.');
+  console.error([
+    'No key found. Pass it directly:',
+    '',
+    '  node scripts/probe-xai.js --key xai-...',
+    '',
+    'or set XAI_API_KEY in the environment, or put it in .env and run:',
+    '',
+    '  node --env-file-if-exists=.env scripts/probe-xai.js',
+    '',
+    `Checked XAI_API_KEY (${process.env.XAI_API_KEY ? 'set' : 'unset'}),`
+      + ` XAI_KEY (${process.env.XAI_KEY ? 'set' : 'unset'}),`
+      + ` GROK_API_KEY (${process.env.GROK_API_KEY ? 'set' : 'unset'}).`,
+  ].join('\n'));
   process.exit(1);
 }
 

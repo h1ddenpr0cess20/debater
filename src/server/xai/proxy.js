@@ -219,6 +219,27 @@ export function createXaiProxy(config) {
     const call = readCall(req.url, config);
     const self = debater(call.id);
 
+    /**
+     * What actually went up and what actually came back, in the terminal running
+     * the server.
+     *
+     * A debate that does nothing and says nothing about why is the failure this
+     * engine keeps landing in, and it is unfixable from the page: every frame it
+     * sends looks plausible and every reply it never gets looks the same as
+     * every other reply it never gets. So the proxy — the one place that sees
+     * both halves — says what it saw. Audio is left out or it is the only thing
+     * you would read; everything else is one line, and an error is printed whole.
+     */
+    const trace = (arrow, event) => {
+      if (!config.trace) return;
+      const type = event?.type ?? '?';
+      if (type === 'input_audio_buffer.append' || /audio\.delta$/.test(type)) return;
+      const detail = type === 'error' || event?.response?.status === 'failed'
+        ? `  ${JSON.stringify(event.error ?? event.response?.status_details ?? event.response)}`
+        : '';
+      console.log(`xai[${call.id}] ${arrow} ${type}${detail}`);
+    };
+
     const tell = (message) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type: 'error', error: { message } }));
@@ -288,7 +309,12 @@ export function createXaiProxy(config) {
     };
 
     upstream.on('open', () => {
-      upstream.send(update());
+      const first = update();
+      if (config.trace) {
+        console.log(`xai[${call.id}] → session.update on ${call.model} as ${call.voice}`);
+        console.log(JSON.parse(first).session);
+      }
+      upstream.send(first);
       replay();
       for (const frame of pending) upstream.send(frame);
       pending = [];
@@ -304,14 +330,26 @@ export function createXaiProxy(config) {
       if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
       if (isBinary) return;
       const text = data.toString();
+      /** Parsed only when there is a reason to: audio deltas are most of these. */
+      if (config.trace && !/"(response\.output_audio|response\.audio)\.delta"/.test(text)) {
+        try {
+          trace('←', JSON.parse(text));
+        } catch {
+          console.log(`xai[${call.id}] ← <unparseable> ${text.slice(0, 200)}`);
+        }
+      }
       if (INSPECT.test(text)) inspect(text);
     });
 
     upstream.on('error', (err) => {
+      if (config.trace) console.log(`xai[${call.id}] ← SOCKET ERROR ${err.message}`);
       tell(`the call to xAI failed — ${err.message}`);
     });
 
     upstream.on('close', (code, reason) => {
+      if (config.trace) {
+        console.log(`xai[${call.id}] ← closed ${code} ${reason?.toString() || ''}`);
+      }
       if (client.readyState === WebSocket.OPEN) {
         client.close(safeCloseCode(code), reason?.toString().slice(0, 120) || '');
       }
@@ -349,8 +387,12 @@ export function createXaiProxy(config) {
       }
 
       const event = sanitize(incoming);
-      if (!event) return;
+      if (!event) {
+        trace('✗ dropped', incoming);
+        return;
+      }
       if (event.type === 'response.create') floor.asked();
+      trace('→', event);
 
       const frame = JSON.stringify(event);
       if (upstream.readyState === WebSocket.OPEN) upstream.send(frame);
