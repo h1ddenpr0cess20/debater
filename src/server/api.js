@@ -63,11 +63,13 @@ function roster(config) {
  * actually take a call, and the picker greys out the other rather than the page
  * finding out at the point of dialling.
  */
-function engineEntry({ id, label, ready, model, models, voices, debaterVoices, switches = [] }) {
+function engineEntry({ id, label, ready, key, model, models, voices, debaterVoices, switches = [] }) {
   return {
     id,
     label,
     ready,
+    /** Which variable to set to make it ready, so the page can say so. */
+    key,
     model,
     models,
     voices,
@@ -83,31 +85,28 @@ function engineEntry({ id, label, ready, model, models, voices, debaterVoices, s
  * down with it — the engine comes back not ready, and the other one still works.
  */
 async function openaiEngine(config, openai) {
-  if (!config.apiKey) {
-    return engineEntry({
-      id: 'openai',
-      label: 'OpenAI Realtime',
-      ready: false,
-      model: config.defaultModel,
-      models: [],
-      voices: config.voices,
-      debaterVoices: config.debaterVoices,
-    });
-  }
-
   let models = [];
-  try {
-    models = await openai.listRealtimeModels();
-  } catch (err) {
-    console.warn(`openai: could not list the realtime models — ${err.message}`);
+  if (config.apiKey) {
+    try {
+      models = await openai.listRealtimeModels();
+    } catch (err) {
+      console.warn(`openai: could not list the realtime models — ${err.message}`);
+    }
   }
 
   return engineEntry({
     id: 'openai',
     label: 'OpenAI Realtime',
     ready: models.length > 0,
+    key: 'OPENAI_API_KEY',
     model: config.defaultModel,
-    models,
+    /**
+     * The default, even with no key. An engine that lists nothing is an engine
+     * the page cannot mention, and an engine the page cannot mention is one you
+     * have no way of discovering exists — which is the whole reason the other
+     * one went missing. It comes back as an entry that says what it wants.
+     */
+    models: models.length ? models : [{ id: config.defaultModel, display_name: config.defaultModel }],
     voices: config.voices,
     debaterVoices: config.debaterVoices,
   });
@@ -120,6 +119,7 @@ function xaiEngine(config) {
     id: 'xai',
     label: 'xAI Grok Voice',
     ready: Boolean(xai.apiKey),
+    key: 'XAI_API_KEY',
     model: xai.defaultModel,
     models: xai.models.map((id) => ({ id, display_name: id })),
     voices: xai.voices,

@@ -8,6 +8,7 @@ const OPENAI = {
   id: 'openai',
   label: 'OpenAI Realtime',
   ready: true,
+  key: 'OPENAI_API_KEY',
   model: 'gpt-realtime-2.1',
   models: [{ id: 'gpt-realtime-2.1', display_name: 'gpt-realtime-2.1' }, { id: 'other-realtime' }],
   voices: ['ash', 'cedar', 'verse'],
@@ -19,6 +20,7 @@ const XAI = {
   id: 'xai',
   label: 'xAI Grok Voice',
   ready: true,
+  key: 'XAI_API_KEY',
   model: 'grok-voice-latest',
   models: [{ id: 'grok-voice-latest' }],
   voices: ['atlas', 'orion', 'rex'],
@@ -227,10 +229,16 @@ describe('createControls', () => {
       assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
     });
 
-    it('leaves out an engine there is no key for', () => {
+    it('still lists an engine there is no key for, saying what it wants', () => {
       controls.setCatalog(ONE_ENGINE);
-      assert.deepEqual(groups(), ['OpenAI Realtime']);
-      assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime']);
+      assert.deepEqual(groups(), ['OpenAI Realtime', 'xAI Grok Voice — set XAI_API_KEY']);
+      assert.equal(page.$$('#model optgroup')[1].disabled, true);
+      assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
+    });
+
+    it('does not open on a model it has no key to dial', () => {
+      const chosen = controls.setCatalog({ ...ONE_ENGINE, engine: 'xai' });
+      assert.equal(chosen.engine, 'openai');
     });
 
     it('opens on the model the server named', () => {
@@ -238,12 +246,6 @@ describe('createControls', () => {
       assert.equal(chosen.engine, 'xai');
       assert.equal(chosen.model, 'grok-voice-latest');
       assert.equal(page.$('#model').value, 'grok-voice-latest');
-    });
-
-    it('opens on one it can dial when the named engine cannot', () => {
-      const chosen = controls.setCatalog({ ...ONE_ENGINE, engine: 'xai' });
-      assert.equal(chosen.engine, 'openai');
-      assert.equal(chosen.model, 'gpt-realtime-2.1');
     });
 
     it('says which engine a model belongs to, so nothing has to parse a name', () => {

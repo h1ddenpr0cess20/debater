@@ -101,19 +101,24 @@ export function createControls({
   function buildModels() {
     modelEl.replaceChildren();
     for (const one of engines.values()) {
-      if (!one.ready || !one.models.length) continue;
+      if (!one.models.length) continue;
       const group = doc.createElement('optgroup');
-      group.label = one.label;
+      /** An engine with no key is listed and greyed, saying what it wants —
+       *  leaving it out is how a whole provider goes missing with no clue why. */
+      group.label = one.ready ? one.label : `${one.label} — set ${one.key}`;
+      group.disabled = !one.ready;
       for (const model of one.models) {
         const el = option(doc, model.display_name ?? model.id, model.id);
-        /** Whose model it is rides on the option rather than inside its value:
-         *  the value stays the plain model id, which is what gets dialled. */
         el.dataset.engine = one.id;
+        el.disabled = !one.ready;
         group.append(el);
       }
       modelEl.append(group);
     }
   }
+
+  /** The first model that can actually be dialled, whoever runs it. */
+  const firstReady = () => [...modelEl.options].find((o) => !o.disabled)?.value ?? '';
 
   /** The engine behind whatever is selected, read off the option itself. */
   const selectedEngine = () => modelEl.selectedOptions[0]?.dataset.engine ?? '';
@@ -303,11 +308,10 @@ export function createControls({
       }
 
       buildModels();
-      /** Whichever the server opens on, or the first thing in the list. */
       const opening = engines.get(catalog.engine);
       const start = opening?.ready && opening.models.some((m) => m.id === opening.model)
         ? opening.model
-        : modelEl.options[0]?.value;
+        : firstReady();
 
       engine = '';
       return { ...useModel(start), caps: caps() };
