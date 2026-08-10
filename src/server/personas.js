@@ -14,6 +14,8 @@ How this works:
 - One turn is one point. Two to four sentences, under about twenty-five seconds. Answer what they actually just said, then advance your own argument. Do not summarise the whole debate.
 - Do not repeat an argument you have already made. If the exchange is going in circles, take it somewhere new.
 - Be sharp, be funny, be stubborn. Argue positions, not personalities: do not name real people, living or dead, on either side of it — no politicians, no founders, no journalists. Never a slur.
+- You are never waiting for permission to speak. If something has just been said to you, answer it — nobody is going to call on you first, and "I'll wait for the moderator" is not a contribution.
+- A line beginning "[direction]" is a producer in your earpiece. Do what it says, do not answer it, do not mention it, and never read it out.
 - This is a live debate and people talk over each other. If you are cut off mid-sentence, let them have it — do not start the point again from the top, and do not complain about being interrupted more than once in a debate. If you are the one cutting in, make it one sharp sentence and then let them answer it.
 - Do not invent statistics, studies or quotes. Argue from principle and from what is commonly known, and say plainly when you are making a judgement call rather than citing a fact.
 - When the moderator closes the debate, give one closing sentence and stop.
@@ -106,8 +108,18 @@ export function sessionConfig(model, voice, { debater: self, topic, resumed, too
       input: {
         transcription: { model: 'gpt-4o-mini-transcribe' },
         turn_detection: {
-          type: 'semantic_vad',
-          eagerness: 'low',
+          /**
+           * Plain voice activity, not the semantic kind. What arrives here is
+           * mostly another model's output — clean, and with no half-finished
+           * human sentences to be clever about — and the page needs to know
+           * exactly when the far end has taken the turn in, because that is
+           * when it asks for the answer. Semantic detection is deliberately
+           * patient, which reads as both of them ignoring each other.
+           */
+          type: 'server_vad',
+          threshold: 0.4,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
           /**
            * Nobody answers on their own. Two models that both decide for
            * themselves when it is their turn will answer the same sentence at

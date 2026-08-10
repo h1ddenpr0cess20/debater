@@ -15,7 +15,7 @@ import { createHud } from './ui/hud.js';
 import { stripStageChrome } from './ui/stage.js';
 import { createToolsPanel } from './ui/tools.js';
 import { createTranscriptPanel } from './ui/transcript.js';
-import { trackControlsHeight, trackKeyboardInset } from './ui/viewport.js';
+import { trackKeyboardInset } from './ui/viewport.js';
 
 const stage = stripStageChrome(document.querySelector('three-d-stage'));
 const { THREE } = await stage.ready;
@@ -29,7 +29,6 @@ const transcripts = createTranscripts();
 const switches = createToolSwitches();
 
 trackKeyboardInset();
-trackControlsHeight(document.querySelector('#controls'));
 
 const toolsPanel = createToolsPanel({ switches });
 const connectorsPanel = createConnectorsPanel({

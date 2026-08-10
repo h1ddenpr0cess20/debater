@@ -39,6 +39,18 @@ const TRANSCRIPT_WAIT = 1200;
 const ASK_TIMEOUT = 6000;
 
 /**
+ * How long to wait for the listener to take in what was just said.
+ *
+ * Asking for an answer is not the same as the far end having heard the
+ * question. Their session commits the incoming audio when its own voice
+ * detection decides the turn is over, and only what is committed is in the
+ * conversation — ask first and they answer an empty room, which comes out as
+ * two models talking politely past each other. So the handover waits for that,
+ * and only gives up on it after this long.
+ */
+const HEARD_WAIT = 3000;
+
+/**
  * Cutting in.
  *
  * A debate where each side waits politely for the other to finish is not a
@@ -65,9 +77,21 @@ export const CUT = {
   ramblingAfter: 14_000,
 };
 
-const INTERJECT = 'Cut in now, over the top of them. One sentence, sharp, and it'
-  + ' has to be about the thing they are saying right now. No greeting, no'
-  + ' apology for interrupting, no summing up — object, and stop.';
+/**
+ * One-off directions, sent as a line rather than as response instructions.
+ *
+ * Instructions on a response replace the session's instead of adding to them,
+ * so steering a turn that way strips the persona off it. These go over as a
+ * "[direction]" item, which both personas are told to obey and never read out.
+ */
+const DIRECTION = {
+  interject: 'Cut in now, over the top of them. One sentence, sharp, and about the'
+    + ' thing they are saying right this second. No greeting, no apology for'
+    + ' interrupting, no summing up — object, and stop.',
+  opening: 'Give your opening statement now. Under thirty seconds.',
+  reply: 'Answer what they just said, then give your own opening statement. Under'
+    + ' thirty seconds. Do not wait to be called on.',
+};
 
 export function createDirector({
   bus,
@@ -89,6 +113,26 @@ export function createDirector({
   const finished = Object.fromEntries(order.map((id) => [id, false]));
   /** The last thing each of them said, for when the audio did not carry it. */
   const last = Object.fromEntries(order.map((id) => [id, '']));
+  /** Whether each of them has taken in what was said to them since. */
+  const heardIt = Object.fromEntries(order.map((id) => [id, false]));
+  /**
+   * Whether each of them owes us an answer.
+   *
+   * A session takes one response at a time — a second `response.create` while
+   * one is running is refused outright ("conversation already has an active
+   * response"), and the debate loses a turn to an error. `busy` alone is not
+   * enough to go on: it only turns true when the response has actually been
+   * created, and everything here is asking a moment before that.
+   */
+  const pending = Object.fromEntries(order.map((id) => [id, false]));
+  /**
+   * An ask that is waiting for the answer it replaces to finish dying.
+   *
+   * Cancelling is a message, not an instant: the response is only really gone
+   * when its `done` comes back. Asking in between is the same refusal as asking
+   * during it, which is what moderating over the top of someone used to do.
+   */
+  const queued = Object.fromEntries(order.map((id) => [id, null]));
   /** What the microphone said, as transcribed by whichever session got it first. */
   let heard = '';
 
@@ -102,6 +146,8 @@ export function createDirector({
   let idleTimer = 0;
   let askTimer = 0;
   let handTimer = 0;
+  let heardTimer = 0;
+  let waitingOn = null;
   let asked = null;
   let frame = 0;
 
@@ -166,13 +212,23 @@ export function createDirector({
    * response that never starts is the one failure that would end a debate
    * silently, so it is the one thing here that retries.
    */
-  function ask(id, { instructions, retry = true } = {}) {
+  function ask(id, { direction, retry = true } = {}) {
     const them = roster[id];
     if (!them?.connected || phase !== 'running') return false;
+    /** Already answering, or already asked and about to: one at a time. */
+    if (pending[id] || them.busy || them.state === 'speaking') return false;
+    queued[id] = null;
+
+    clearTimeout(heardTimer);
+    heardTimer = 0;
+    waitingOn = null;
     next = id;
     asked = id;
-    emit('asked', { id, cutting: Boolean(instructions) });
-    them.say({ instructions });
+    pending[id] = true;
+    heardIt[id] = false;
+    emit('asked', { id, direction: direction ?? null });
+    if (direction) them.send(`[direction] ${direction}`, { answer: false });
+    them.say();
 
     clearTimeout(askTimer);
     askTimer = 0;
@@ -185,9 +241,37 @@ export function createDirector({
       /** Nothing came back. Hand over the words instead of the sound. */
       const words = heard || last[other(id)];
       emit('nudge', { id, spoken: Boolean(words) });
+      pending[id] = false;
       if (words) again.send(words);
       else again.say();
+      pending[id] = true;
     }, ASK_TIMEOUT);
+    return true;
+  }
+
+  /**
+   * Hands the turn to one of them, once they have actually heard it.
+   *
+   * Their session says so by committing the incoming audio, which arrives here
+   * as `speech` ending. Waiting for it is the difference between a debate and
+   * two monologues; not waiting for ever is the difference between a debate and
+   * a stall, so there is a fallback, and it says out loud that it fired.
+   */
+  function handOver(to, { direction } = {}) {
+    clearTimeout(heardTimer);
+    if (heardIt[to]) return ask(to, { direction });
+
+    waitingOn = to;
+    heardTimer = setTimeout(() => {
+      heardTimer = 0;
+      if (phase !== 'running' || waitingOn !== to) return;
+      /** They never took it in. Say so — this is the failure that looks like
+       *  them ignoring each other — and hand the words over instead. */
+      emit('unheard', { id: to });
+      const words = last[other(to)];
+      if (words) roster[to]?.send(`[the other lectern] ${words}`, { answer: false });
+      ask(to, { direction });
+    }, HEARD_WAIT);
     return true;
   }
 
@@ -203,7 +287,9 @@ export function createDirector({
     if (turns >= limits.turns) return stop(`that is ${turns} turns — the limit`);
     /** The person in the room is mid-sentence; they get the floor, not us. */
     if (floor === MODERATOR || handTimer) return;
-    ask(other(id));
+    /** The second turn of a debate is the other one's opening statement, which
+     *  is a reply as well — everything after that needs no telling. */
+    handOver(other(id), turns === 1 ? { direction: DIRECTION.reply } : {});
   }
 
   /** Whether the one listening should cut in over the one talking, right now. */
@@ -231,7 +317,7 @@ export function createDirector({
      *  The speaker's own turn detection is what cuts their answer short. */
     bus.relay(id, speaker, true);
     emit('interrupt', { id, over: speaker });
-    ask(id, { instructions: INTERJECT, retry: false });
+    ask(id, { direction: DIRECTION.interject, retry: false });
   }
 
   /**
@@ -257,7 +343,7 @@ export function createDirector({
     if (heard) emit('turn', { speaker: MODERATOR, content: heard });
     heard = '';
     route(to);
-    ask(to);
+    handOver(to);
   }
 
   for (const agent of agents) {
@@ -271,6 +357,23 @@ export function createDirector({
     });
 
     agent.on('pulse', (weight) => emit('pulse', { id: agent.id, weight }));
+
+    /**
+     * Their session's own voice detection, on the audio coming *in*. When it
+     * closes a turn, what they heard is committed to their conversation — and
+     * that, not a stopwatch, is when they can be asked to answer it.
+     */
+    agent.on('speech', ({ started }) => {
+      if (started) return;
+      heardIt[agent.id] = true;
+      emit('took', { id: agent.id });
+      if (waitingOn === agent.id) {
+        clearTimeout(heardTimer);
+        heardTimer = 0;
+        waitingOn = null;
+        ask(agent.id);
+      }
+    });
 
     agent.on('text', (chunk) => {
       if (floor === agent.id) running += chunk;
@@ -301,6 +404,12 @@ export function createDirector({
         usage[agent.id].input += used.input_tokens ?? 0;
         usage[agent.id].output += used.output_tokens ?? 0;
       }
+      /** They have answered; they may be asked again — and if something was
+       *  waiting on exactly that, it goes now. */
+      pending[agent.id] = false;
+      const waiting = queued[agent.id];
+      queued[agent.id] = null;
+      if (waiting && phase === 'running') ask(agent.id, waiting);
       /** Generation is over; the audio is not. `tick` decides when it is. */
       finished[agent.id] = true;
       quiet[agent.id] = null;
@@ -378,21 +487,42 @@ export function createDirector({
 
     const target = to ?? named(line) ?? next ?? order[0];
     /** Whoever was mid-answer is talked over, which is a moderator's privilege. */
-    for (const agent of agents) if (agent.id !== target) agent.cancel();
+    for (const agent of agents) {
+      if (agent.id === target) continue;
+      agent.cancel();
+      pending[agent.id] = false;
+    }
+
     clearTimeout(handTimer);
     handTimer = 0;
     floor = null;
     route(target);
+
+    /**
+     * The one being asked may be mid-answer too — a question put over the top
+     * of them replaces it. Their answer has to actually be gone before the next
+     * can be asked for, so this waits for its `done` rather than racing it.
+     */
+    if (roster[target]?.busy) {
+      queued[target] = {};
+      roster[target].cancel();
+      return true;
+    }
+
     ask(target);
     return true;
   }
 
-  /** The moderator's opening, and the same thing after a pause. */
-  function announce(line, to) {
+  /**
+   * The moderator's opening, and the same thing after a pause. Asked for
+   * directly rather than handed over: the line went across as text, so there is
+   * nothing for anybody to have heard first.
+   */
+  function announce(line, to, { direction } = {}) {
     for (const agent of agents) agent.send(`[${MODERATOR}] ${line}`, { answer: false });
     emit('turn', { speaker: MODERATOR, content: line });
     route(to);
-    ask(to);
+    ask(to, { direction });
   }
 
   async function start({ topic: subject, first = order[0], turns: earlier = [] } = {}) {
@@ -430,6 +560,11 @@ export function createDirector({
     turns = 0;
     lastCut = -CUT.cooldown;
     heard = '';
+    for (const id of order) {
+      heardIt[id] = false;
+      pending[id] = false;
+      queued[id] = null;
+    }
     for (const id of order) last[id] = '';
     startedAt = now();
     elapsed = 0;
@@ -439,10 +574,11 @@ export function createDirector({
     report();
     if (!frame) frame = requestAnimationFrame(tick);
 
+    const order2 = order.map((id) => roster[id].name);
     announce(resumed
       ? `We are picking this back up. The motion is still: ${topic}. ${roster[first].name}, carry on.`
-      : `Tonight's motion: ${topic}. ${roster[first].name}, opening statement — keep it under thirty seconds.`,
-    first);
+      : `Tonight's motion: ${topic}. ${roster[first].name} opens, ${roster[first].name === order2[0] ? order2[1] : order2[0]} follows straight after — and from there the two of you go at each other. Nobody waits to be called on.`,
+    first, { direction: resumed ? null : DIRECTION.opening });
   }
 
   /**
@@ -456,12 +592,16 @@ export function createDirector({
     bus.silence();
     for (const agent of agents) {
       agent.cancel();
+      pending[agent.id] = false;
+      queued[agent.id] = null;
       bus.live(agent.id, false);
     }
     clearTimeout(askTimer);
     clearTimeout(handTimer);
-    askTimer = handTimer = 0;
+    clearTimeout(heardTimer);
+    askTimer = handTimer = heardTimer = 0;
     asked = null;
+    waitingOn = null;
     floor = null;
     elapsed = now() - startedAt;
     setPhase('paused', why);
@@ -488,12 +628,18 @@ export function createDirector({
     clearTimeout(askTimer);
     clearTimeout(idleTimer);
     clearTimeout(handTimer);
-    askTimer = idleTimer = handTimer = 0;
+    clearTimeout(heardTimer);
+    askTimer = idleTimer = handTimer = heardTimer = 0;
     asked = null;
+    waitingOn = null;
     cancelAnimationFrame(frame);
     frame = 0;
     bus.silence();
-    for (const agent of agents) agent.stop();
+    for (const agent of agents) {
+      agent.stop();
+      pending[agent.id] = false;
+      queued[agent.id] = null;
+    }
     for (const id of order) emit('level', { id, level: 0 });
     floor = null;
     if (phase !== 'idle') setPhase('over', why);

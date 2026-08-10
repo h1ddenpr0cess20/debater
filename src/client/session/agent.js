@@ -170,9 +170,14 @@ export function createAgentSession({
    *
    * Every response in this app is asked for from here — turn detection is told
    * not to create them, or two models both decide it is their turn and answer
-   * the same sentence at once. `instructions` is how one response is given a
-   * different job from the rest of the debate: cut in now, sum up now, and so
-   * on, without touching the session's own instructions.
+   * the same sentence at once.
+   *
+   * `instructions` is deliberately unused by the director, and is a trap worth
+   * leaving documented: instructions on a response *replace* the session's for
+   * that response, they do not add to them. Steering one turn that way would
+   * hand the model a job with no persona attached to it, and what came out
+   * would not be a debater. One-off directions go over as a "[direction]" line
+   * instead, which the personas are told how to read.
    */
   function say({ instructions } = {}) {
     if (!call?.open) return false;

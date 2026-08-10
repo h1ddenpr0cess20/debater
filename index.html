@@ -9,28 +9,26 @@
 <title>Debater — two voice agents, two podiums</title>
 </head>
 <body>
-<three-d-stage name="debate" background="#0b0c10"></three-d-stage>
-
 <header id="bar">
   <div id="phase" class="chip" data-phase="idle">idle</div>
-  <p id="motion"></p>
   <div id="meters">
     <span id="meter-turns" class="chip">0/0 turns</span>
     <span id="meter-clock" class="chip">0:00</span>
     <span id="meter-tokens" class="chip">0 tok</span>
   </div>
+  <div id="tabs">
+    <button id="toolbox-toggle" class="chip" type="button" aria-expanded="false"
+            aria-controls="toolbox">tools</button>
+    <button id="connectors-toggle" class="chip" type="button" aria-expanded="false"
+            aria-controls="connectors">connectors</button>
+    <button id="log-toggle" class="chip" type="button" aria-expanded="false"
+            aria-controls="log">log</button>
+  </div>
+  <p id="motion"></p>
+  <p id="notice" role="status"></p>
 </header>
 
-<p id="notice" role="status"></p>
-
-<div id="tabs">
-  <button id="toolbox-toggle" class="chip" type="button" aria-expanded="false"
-          aria-controls="toolbox">tools</button>
-  <button id="connectors-toggle" class="chip" type="button" aria-expanded="false"
-          aria-controls="connectors">connectors</button>
-  <button id="log-toggle" class="chip" type="button" aria-expanded="false"
-          aria-controls="log">log</button>
-</div>
+<three-d-stage name="debate" background="#0b0c10"></three-d-stage>
 
 <div id="floor">
   <p id="mod" class="chip" data-live="false"><span class="dot"></span>moderator</p>

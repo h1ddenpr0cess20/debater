@@ -50,10 +50,17 @@ export function createEventHandler({
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
         flush();
+        emit('speech', { started: true });
         setState('listening');
         break;
 
+      /**
+       * The far end has decided the incoming turn is over, and committed what
+       * it heard to the conversation. That is the moment an answer can be
+       * asked for: ask before it and the answer is to an empty room.
+       */
       case 'input_audio_buffer.speech_stopped':
+        emit('speech', { started: false });
         setState('thinking');
         break;
 

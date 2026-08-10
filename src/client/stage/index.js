@@ -23,7 +23,7 @@ const REACH = 1.95;
 const TOE_IN = 0.34;
 
 /** How much room to leave around the two of them, whatever shape the window is. */
-const MARGIN = 1.06;
+const MARGIN = 1.04;
 
 const ACCENT = { left: '#2f5d92', right: '#8e3232' };
 
@@ -124,23 +124,57 @@ export function buildHall({ stage, THREE }) {
   const set = new THREE.Box3()
     .setFromObject(left.group)
     .union(new THREE.Box3().setFromObject(right.group));
-  const size = set.getSize(new THREE.Vector3());
   const middle = set.getCenter(new THREE.Vector3());
+  const span = set.getSize(new THREE.Vector3());
 
-  function frame() {
-    const aspect = camera.aspect || 1;
-    const half = Math.tan((camera.fov * Math.PI) / 360);
-    const forHeight = size.y / 2 / half;
-    const forWidth = size.x / 2 / (half * aspect);
-    /** Plus the depth, or the near lectern leans out of the shot. */
-    const dist = Math.max(forHeight, forWidth) * MARGIN + size.z / 2;
+  /** Every corner of the set. What has to be on screen, all of it, always. */
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(
+    i & 1 ? set.max.x : set.min.x,
+    i & 2 ? set.max.y : set.min.y,
+    i & 4 ? set.max.z : set.min.z,
+  ));
 
+  const scratch = new THREE.Vector3();
+
+  function place(dist) {
     /** Raised enough to see over both lecterns at whoever is behind them. */
-    camera.position.set(0, middle.y + dist * 0.17, dist);
+    camera.position.set(0, middle.y + dist * 0.16, dist);
     camera.near = Math.max(dist / 200, 0.01);
     camera.far = dist * 40;
     camera.updateProjectionMatrix();
-    controls.target.set(0, middle.y + 0.1, 0);
+    camera.lookAt(0, middle.y, 0);
+    camera.updateMatrixWorld(true);
+  }
+
+  function fits() {
+    return corners.every((corner) => {
+      const ndc = scratch.copy(corner).project(camera);
+      return Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1;
+    });
+  }
+
+  /**
+   * Framed by asking, rather than by trigonometry.
+   *
+   * A box fit gets it wrong here and a sphere fit gets it wrong the other way:
+   * the stage is wide and shallow, the camera looks down it at an angle, and
+   * the canvas takes whatever shape is left once the captions and the controls
+   * have had theirs. So this walks the camera back until all eight corners of
+   * the set are inside the frustum, which is the thing actually being asked,
+   * and stops the moment they are.
+   */
+  function frame() {
+    const half = Math.tan((camera.fov * Math.PI) / 360);
+    let dist = Math.max(span.y / 2 / half, span.x / 2 / (half * (camera.aspect || 1)));
+
+    place(dist);
+    for (let i = 0; i < 60 && !fits(); i += 1) {
+      dist *= 1.04;
+      place(dist);
+    }
+
+    place(dist * MARGIN);
+    controls.target.set(0, middle.y, 0);
     controls.update();
   }
 

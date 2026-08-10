@@ -33,7 +33,8 @@ function harness({ caps = {}, mic = null, chance = () => 1 } = {}) {
     chance,
   });
 
-  for (const name of ['phase', 'floor', 'turn', 'interrupt', 'asked', 'nudge', 'meter', 'error']) {
+  for (const name of ['phase', 'floor', 'turn', 'interrupt', 'asked', 'nudge', 'meter',
+    'error', 'unheard', 'took']) {
     director.on(name, (payload) => events.push({ name, payload }));
   }
 
@@ -149,7 +150,42 @@ describe('a debate', () => {
     h.tick();
     h.tick(1000);
     assert.equal(h.director.turns, 1);
+
+    h.potato.emit('speech', { started: false });
     assert.equal(h.potato.asks.length, 1, 'the other one was never asked');
+  });
+
+  it('does not ask the other one until they have actually heard it', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak('bread is a scam');
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.director.turns, 1);
+    assert.equal(h.potato.asks.length, 0, 'answered before hearing the question');
+
+    /** Their session commits what came in, and only then is it their turn. */
+    h.potato.emit('speech', { started: false });
+    assert.equal(h.potato.asks.length, 1);
+  });
+
+  it('hands the words over, loudly, when the audio never landed', async () => {
+    h.restore();
+    h = harness();
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak('bread is a scam');
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+
+    assert.deepEqual(h.seen('unheard'), [{ id: 'potato' }]);
+    assert.ok(h.potato.sent.some((line) => /bread is a scam/.test(line.text)));
+    assert.equal(h.potato.asks.length, 1);
   });
 
   it('counts turns and hangs up on the cap', async () => {
@@ -289,7 +325,8 @@ describe('cutting in', () => {
     const [cut] = h.seen('interrupt');
     assert.deepEqual(cut, { id: 'potato', over: 'egg' });
     assert.equal(h.bus.isOpen('potato', 'egg'), true, 'the speaker cannot hear the objection');
-    assert.match(h.potato.asks.at(-1).instructions, /Cut in now/);
+    assert.match(h.potato.sent.at(-1).text, /^\[direction\] Cut in now/);
+    assert.equal(h.potato.sent.at(-1).answer, false, 'the direction was answered, not obeyed');
   });
 
   it('never happens when the dice say not to', async () => {
@@ -375,6 +412,30 @@ describe('the moderator', () => {
     assert.equal(h.egg.cancels, 1);
   });
 
+  it('waits for a cancelled answer to die before asking for the next one', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.busy = true;
+    const asked = h.egg.asks.length;
+
+    /** Put back to the one who is already talking: cancel, then wait. */
+    h.director.say('Marc, answer the question');
+    assert.equal(h.egg.cancels, 1);
+    assert.equal(h.egg.asks.length, asked, 'asked while an answer was still running');
+
+    h.egg.busy = false;
+    h.egg.finish();
+    assert.equal(h.egg.asks.length, asked + 1, 'never asked once the answer was gone');
+  });
+
+  it('never asks a lectern that is already answering', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.potato.busy = true;
+    const asked = h.potato.asks.length;
+    h.director.say('Tater?');
+    assert.equal(h.potato.asks.length, asked);
+  });
+
   it('hands back to whoever was named once the microphone goes quiet', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     mic.live = true;
@@ -388,8 +449,11 @@ describe('the moderator', () => {
 
     /** The transcript is what says who was addressed; it arrives from a session. */
     h.egg.emit('heard', 'Tater, defend that');
-    assert.equal(h.potato.asks.length, 1);
     assert.deepEqual(h.seen('turn').at(-1), { speaker: 'moderator', content: 'Tater, defend that' });
+
+    /** Same rule as between the two of them: answer it once you have it. */
+    h.potato.emit('speech', { started: false });
+    assert.equal(h.potato.asks.length, 1);
   });
 
   it('only logs the microphone once, however many sessions transcribed it', async () => {
