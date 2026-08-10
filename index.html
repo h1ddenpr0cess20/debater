@@ -31,12 +31,12 @@
   <p id="mod" class="chip" data-live="false"><span class="dot"></span>moderator</p>
 
   <section class="lectern" data-debater="potato" data-state="idle" data-floor="false">
-    <p class="who chip"><span class="name">Tater</span><span class="party">Democrat</span><span class="state">idle</span></p>
+    <p class="who chip"><span class="name">Tater</span><span class="party"><span class="long">Democrat</span><span class="short">Dem</span></span><span class="state">idle</span></p>
     <div class="caption" aria-live="polite"></div>
   </section>
 
   <section class="lectern" data-debater="egg" data-state="idle" data-floor="false">
-    <p class="who chip"><span class="name">Marc</span><span class="party">Republican</span><span class="state">idle</span></p>
+    <p class="who chip"><span class="name">Marc</span><span class="party"><span class="long">Republican</span><span class="short">Rep</span></span><span class="state">idle</span></p>
     <div class="caption" aria-live="polite"></div>
   </section>
 </div>
@@ -84,6 +84,7 @@
   </div>
 
   <div id="options">
+    <select id="engine" class="chip" aria-label="Engine" hidden></select>
     <select id="model" class="chip" aria-label="Model"><option>loading…</option></select>
     <div id="voices"></div>
     <button id="heckle" class="chip" type="button" aria-pressed="true"

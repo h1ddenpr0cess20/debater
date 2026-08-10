@@ -39,6 +39,22 @@ const TRANSCRIPT_WAIT = 1200;
 const ASK_TIMEOUT = 6000;
 
 /**
+ * How long a debate may be doing nothing at all before it is prodded.
+ *
+ * The failure this exists for looks the same however it is reached: the debate
+ * is running, neither lectern is talking or generating, and no timer is left
+ * armed to change that — so it stays that way until somebody hits stop. Every
+ * hand-over path here can end in `ask` declining (they are answering already,
+ * they owe us an answer that never arrived, the frame was refused upstream), and
+ * a decline is not a plan. This is the plan.
+ *
+ * It is deliberately not clever about *why*. Anything that can silence the room
+ * for this long with nothing pending is a bug, known or not, and the recovery is
+ * the same one: ask whoever is up next.
+ */
+const STALL_MS = 9000;
+
+/**
  * How long to wait for the listener to take in what was just said.
  *
  * Asking for an answer is not the same as the far end having heard the
@@ -135,6 +151,15 @@ export function createDirector({
   const queued = Object.fromEntries(order.map((id) => [id, null]));
   /** What the microphone said, as transcribed by whichever session got it first. */
   let heard = '';
+  /**
+   * And which session that was.
+   *
+   * Both lecterns transcribe the same microphone, so the second copy has to be
+   * dropped — but one session sends the same line more than once as it fills
+   * out, and that is not a second copy, it is a better one. Whoever got there
+   * first keeps the right to improve on it; the other one is ignored.
+   */
+  let heardFrom = null;
 
   let phase = 'idle';
   let topic = '';
@@ -143,13 +168,39 @@ export function createDirector({
   let turns = 0;
   let startedAt = 0;
   let elapsed = 0;
-  let idleTimer = 0;
-  let askTimer = 0;
-  let handTimer = 0;
-  let heardTimer = 0;
   let waitingOn = null;
   let asked = null;
   let frame = 0;
+
+  /**
+   * Every timer this thing has, in one place.
+   *
+   * They are not bookkeeping — between them they are the whole of the director's
+   * memory that something is *going* to happen. `stalled` reads them to decide
+   * whether the room is waiting on something or merely quiet, so a handle left
+   * behind after its timer has been cleared or has fired reads as a plan that
+   * does not exist, and the recovery below never runs. Hence going through
+   * `arm`/`disarm` rather than four variables and the discipline to zero them.
+   */
+  const timers = { idle: 0, ask: 0, hand: 0, heard: 0 };
+
+  function disarm(...names) {
+    for (const name of names) {
+      clearTimeout(timers[name]);
+      timers[name] = 0;
+    }
+  }
+
+  function arm(name, ms, fn) {
+    disarm(name);
+    timers[name] = setTimeout(() => {
+      timers[name] = 0;
+      fn();
+    }, ms);
+  }
+
+  /** How long the room has been doing nothing, or 0 if it is doing something. */
+  let stalledSince = 0;
 
   /** The turn being spoken now, and when it started — what a cut-in is judged on. */
   let spokenAt = 0;
@@ -197,8 +248,7 @@ export function createDirector({
     if (floor === id) return;
     floor = id;
     route(id);
-    clearTimeout(askTimer);
-    askTimer = 0;
+    disarm('ask');
     asked = null;
     if (id !== MODERATOR) {
       spokenAt = now();
@@ -219,22 +269,22 @@ export function createDirector({
     if (pending[id] || them.busy || them.state === 'speaking') return false;
     queued[id] = null;
 
-    clearTimeout(heardTimer);
-    heardTimer = 0;
+    disarm('heard');
     waitingOn = null;
     next = id;
     asked = id;
     pending[id] = true;
     heardIt[id] = false;
+    /** Something is happening again, whatever the last few seconds looked like. */
+    stalledSince = 0;
     emit('asked', { id, direction: direction ?? null });
     if (direction) them.send(`[direction] ${direction}`, { answer: false });
     them.say();
 
-    clearTimeout(askTimer);
-    askTimer = 0;
+    disarm('ask');
     if (!retry) return true;
 
-    askTimer = setTimeout(() => {
+    arm('ask', ASK_TIMEOUT, () => {
       if (phase !== 'running' || asked !== id) return;
       const again = roster[id];
       if (!again?.connected || again.busy || again.state === 'speaking') return;
@@ -245,7 +295,7 @@ export function createDirector({
       if (words) again.send(words);
       else again.say();
       pending[id] = true;
-    }, ASK_TIMEOUT);
+    });
     return true;
   }
 
@@ -258,20 +308,20 @@ export function createDirector({
    * a stall, so there is a fallback, and it says out loud that it fired.
    */
   function handOver(to, { direction } = {}) {
-    clearTimeout(heardTimer);
+    disarm('heard');
     if (heardIt[to]) return ask(to, { direction });
 
     waitingOn = to;
-    heardTimer = setTimeout(() => {
-      heardTimer = 0;
+    arm('heard', HEARD_WAIT, () => {
       if (phase !== 'running' || waitingOn !== to) return;
+      waitingOn = null;
       /** They never took it in. Say so — this is the failure that looks like
        *  them ignoring each other — and hand the words over instead. */
       emit('unheard', { id: to });
       const words = last[other(to)];
       if (words) roster[to]?.send(`[the other lectern] ${words}`, { answer: false });
       ask(to, { direction });
-    }, HEARD_WAIT);
+    });
     return true;
   }
 
@@ -286,7 +336,7 @@ export function createDirector({
     report();
     if (turns >= limits.turns) return stop(`that is ${turns} turns — the limit`);
     /** The person in the room is mid-sentence; they get the floor, not us. */
-    if (floor === MODERATOR || handTimer) return;
+    if (floor === MODERATOR || timers.hand) return;
     /** The second turn of a debate is the other one's opening statement, which
      *  is a reply as well — everything after that needs no telling. */
     handOver(other(id), turns === 1 ? { direction: DIRECTION.reply } : {});
@@ -329,19 +379,19 @@ export function createDirector({
    * inside one.
    */
   function handBack() {
-    if (handTimer) return;
+    if (timers.hand) return;
     floor = null;
     emit('floor', null);
-    handTimer = setTimeout(finishHandBack, TRANSCRIPT_WAIT);
+    arm('hand', TRANSCRIPT_WAIT, finishHandBack);
   }
 
   function finishHandBack() {
-    clearTimeout(handTimer);
-    handTimer = 0;
+    disarm('hand');
     if (phase !== 'running') return;
     const to = named(heard) ?? next ?? order[0];
     if (heard) emit('turn', { speaker: MODERATOR, content: heard });
     heard = '';
+    heardFrom = null;
     route(to);
     handOver(to);
   }
@@ -368,8 +418,7 @@ export function createDirector({
       heardIt[agent.id] = true;
       emit('took', { id: agent.id });
       if (waitingOn === agent.id) {
-        clearTimeout(heardTimer);
-        heardTimer = 0;
+        disarm('heard');
         waitingOn = null;
         ask(agent.id);
       }
@@ -392,12 +441,29 @@ export function createDirector({
      */
     agent.on('heard', (text) => {
       emit('heard', { id: agent.id, text });
-      if (!text || !(floor === MODERATOR || handTimer)) return;
-      if (!heard) heard = text;
-      if (handTimer) finishHandBack();
+      if (!text || !(floor === MODERATOR || timers.hand)) return;
+      if (!heard || heardFrom === agent.id) {
+        heard = text;
+        heardFrom = agent.id;
+      }
+      if (timers.hand) finishHandBack();
     });
 
-    agent.on('error', ({ message }) => emit('error', { id: agent.id, message }));
+    /** A hosted tool, mid-turn: they have gone to look something up. */
+    agent.on('tool', (label) => emit('tool', { id: agent.id, label }));
+
+    /**
+     * A frame the session refused — most often a second `response.create` while
+     * one was already running. Nothing is coming back for it, and `pending` left
+     * standing would decline every future ask for this lectern, which is a
+     * debate that stops without saying so. Whether a response really is in
+     * flight is the session's to answer, so take its word for it rather than
+     * guessing from here.
+     */
+    agent.on('error', ({ message }) => {
+      pending[agent.id] = agent.busy;
+      emit('error', { id: agent.id, message });
+    });
 
     agent.on('done', ({ usage: used } = {}) => {
       if (used) {
@@ -427,8 +493,7 @@ export function createDirector({
     if (level > QUIET_LEVEL) {
       quiet[MODERATOR] = null;
       if (floor !== MODERATOR) {
-        clearTimeout(handTimer);
-        handTimer = 0;
+        disarm('hand');
         takeFloor(MODERATOR);
       }
       return;
@@ -439,6 +504,58 @@ export function createDirector({
     if (at - quiet[MODERATOR] < MODERATOR_QUIET_MS) return;
     quiet[MODERATOR] = null;
     handBack();
+  }
+
+  /**
+   * Whether the room is waiting on nothing.
+   *
+   * Not "is it quiet" — quiet is most of a handover. This is the stronger claim
+   * that there is nothing to be quiet *for*: no timer armed, neither lectern
+   * generating or playing out an answer, and no microphone mid-question. It is
+   * built out of what the sessions say about themselves rather than out of
+   * `pending`, because `pending` is a record of what was asked for and the whole
+   * problem is that it can outlive the answer it was waiting on.
+   */
+  function stalled() {
+    if (phase !== 'running') return false;
+    if (timers.ask || timers.hand || timers.heard) return false;
+    /** A question being asked in the room is not a stall, however quiet the two
+     *  of them are being about it. */
+    if (moderator?.open && moderator.live
+      && (floor === MODERATOR || bus.level(MODERATOR) > QUIET_LEVEL)) return false;
+
+    return order.every((id) => {
+      const them = roster[id];
+      return them?.connected
+        && !them.busy
+        && them.state !== 'speaking'
+        && !finished[id]
+        && bus.level(id) <= QUIET_LEVEL;
+    });
+  }
+
+  /**
+   * Nothing has happened for a while and nothing is going to. Whatever was
+   * dropped — an ask declined, a response that never started, a frame refused —
+   * the room is the room, and it is the director's to restart.
+   */
+  function watchStall(at) {
+    if (!stalled()) {
+      stalledSince = 0;
+      return;
+    }
+    stalledSince ||= at;
+    if (at - stalledSince < STALL_MS) return;
+    stalledSince = 0;
+
+    /** Proven, not assumed: `stalled` just established nothing is in flight. */
+    for (const id of order) {
+      pending[id] = false;
+      queued[id] = null;
+    }
+    const to = next ?? order[0];
+    emit('stalled', { id: to });
+    handOver(to);
   }
 
   /** The clock, the meters, and the level each rig moves to. */
@@ -470,7 +587,11 @@ export function createDirector({
     if (phase === 'running') {
       elapsed = at - startedAt;
       if (elapsed >= limits.seconds * 1000) return stop('time is up');
+      /** A lectern that has gone away is not a debate, and waiting on one is
+       *  the same silence as any other stall with no way out of it. */
+      if (!agents.every((agent) => agent.connected)) return stop('one of them dropped out');
       if (Math.floor(elapsed / 1000) !== Math.floor((elapsed - 16) / 1000)) report();
+      watchStall(at);
     }
   }
 
@@ -493,8 +614,7 @@ export function createDirector({
       pending[agent.id] = false;
     }
 
-    clearTimeout(handTimer);
-    handTimer = 0;
+    disarm('hand');
     floor = null;
     route(target);
 
@@ -560,6 +680,8 @@ export function createDirector({
     turns = 0;
     lastCut = -CUT.cooldown;
     heard = '';
+    heardFrom = null;
+    stalledSince = 0;
     for (const id of order) {
       heardIt[id] = false;
       pending[id] = false;
@@ -596,27 +718,22 @@ export function createDirector({
       queued[agent.id] = null;
       bus.live(agent.id, false);
     }
-    clearTimeout(askTimer);
-    clearTimeout(handTimer);
-    clearTimeout(heardTimer);
-    askTimer = handTimer = heardTimer = 0;
+    disarm('ask', 'hand', 'heard');
     asked = null;
     waitingOn = null;
     floor = null;
+    stalledSince = 0;
     elapsed = now() - startedAt;
     setPhase('paused', why);
 
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(
-      () => stop('paused too long — hung up to stop the meter'),
-      limits.idleSeconds * 1000,
-    );
+    arm('idle', limits.idleSeconds * 1000,
+      () => stop('paused too long — hung up to stop the meter'));
   }
 
   function resume() {
     if (phase !== 'paused') return;
-    clearTimeout(idleTimer);
-    idleTimer = 0;
+    disarm('idle');
+    stalledSince = 0;
     for (const id of order) bus.live(id, true);
     startedAt = now() - elapsed;
     setPhase('running');
@@ -625,13 +742,10 @@ export function createDirector({
 
   /** The real one. Both calls are hung up and nothing is billing. */
   function stop(why = '') {
-    clearTimeout(askTimer);
-    clearTimeout(idleTimer);
-    clearTimeout(handTimer);
-    clearTimeout(heardTimer);
-    askTimer = idleTimer = handTimer = heardTimer = 0;
+    disarm('ask', 'idle', 'hand', 'heard');
     asked = null;
     waitingOn = null;
+    stalledSince = 0;
     cancelAnimationFrame(frame);
     frame = 0;
     bus.silence();

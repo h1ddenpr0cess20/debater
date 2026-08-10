@@ -3,12 +3,18 @@ import { createAnalyser } from '../session/metering.js';
 /**
  * The wiring between the two calls, and the microphone in front of them.
  *
- * Each debater's outbound audio track comes out of a `MediaStreamDestination`
- * node that nothing is connected to yet — so it exists at handshake time and
- * carries silence — and what eventually feeds it is the other debater's voice,
- * arriving over their own call, or the moderator's, arriving from a microphone.
- * That is the whole trick: to OpenAI each session looks like an ordinary call
- * with a person on the other end, and the person is the opposite lectern.
+ * Each debater has an `ear`: a gain node that nothing is connected to yet — so
+ * it exists at handshake time and carries silence — and what eventually feeds it
+ * is the other debater's voice, arriving over their own call, or the moderator's,
+ * arriving from a microphone. That is the whole trick: to the model each session
+ * looks like an ordinary call with a person on the other end, and the person is
+ * the opposite lectern.
+ *
+ * What happens to that ear depends on the engine, and this is the only place the
+ * difference shows. The OpenAI engine wants a media track, so the ear runs into
+ * a `MediaStreamDestination` and the peer connection is handed its stream. The
+ * xAI engine wants PCM in the socket, so its session taps the ear node directly
+ * — same ear, same gates, one fewer round trip through a `MediaStream`.
  *
  * Every hop is gated. A gate is how the floor is handed over, opening two at
  * once is how one debater talks over the other, and closing all of them is how
@@ -35,7 +41,7 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
     let node = from.gates.get(toId);
     if (node) return node;
 
-    const to = channel(toId).feed;
+    const to = channel(toId).ear;
     if (!to) throw new Error(`${toId} has no feed to relay into`);
 
     node = ctx.createGain();
@@ -62,9 +68,19 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
       const existing = channels.get(id);
       if (existing) return existing;
 
+      /**
+       * Two nodes rather than one. `ear` is what the gates open onto and what
+       * the xAI engine reads; `feed` is the media track the OpenAI engine hands
+       * to its peer connection. Deadening the ear deadens both at once, which is
+       * what makes `live` mean the same thing whichever engine is running.
+       */
+      const ear = wanted ? ctx.createGain() : null;
       const feed = wanted ? ctx.createMediaStreamDestination() : null;
+      ear?.connect(feed);
+
       const entry = {
         id,
+        ear,
         feed,
         source: null,
         analyser: null,
@@ -76,9 +92,18 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
 
         /** Their voice, once the call is up: metered here, relayed by the gates. */
         attach(stream) {
-          entry.source = ctx.createMediaStreamSource(stream);
-          entry.analyser = createAnalyser(ctx, stream);
-          for (const node of entry.gates.values()) entry.source.connect(node);
+          entry.attachNode(ctx.createMediaStreamSource(stream));
+        },
+
+        /**
+         * The same, for a voice that is already a node in this graph — which is
+         * what a lectern played out of the page rather than off a media track
+         * is. The bus meters it and relays it exactly as it would any other.
+         */
+        attachNode(node) {
+          entry.source = node;
+          entry.analyser = createAnalyser(ctx, node);
+          for (const gate of entry.gates.values()) node.connect(gate);
         },
 
         detach() {
@@ -118,13 +143,20 @@ export function createAudioBus({ AudioCtx = globalThis.AudioContext } = {}) {
     },
 
     /**
-     * Whether a debater's outbound track carries anything at all.
+     * Whether a debater hears anything at all.
+     *
+     * The ear is deadened and the media track is disabled, which are the same
+     * decision made once for each engine: nothing is relayed into this lectern,
+     * and nothing is encoded and sent on its behalf either.
      *
      * Quiet about a channel that does not exist yet: this is called to make the
      * room ready, and a call that has not come up has nothing to deaden.
      */
     live(id, on) {
-      const track = channels.get(id)?.track;
+      const entry = channels.get(id);
+      if (!entry) return;
+      if (entry.ear) entry.ear.gain.value = on ? 1 : 0;
+      const track = entry.track;
       if (track) track.enabled = Boolean(on);
     },
 

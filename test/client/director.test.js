@@ -34,7 +34,7 @@ function harness({ caps = {}, mic = null, chance = () => 1 } = {}) {
   });
 
   for (const name of ['phase', 'floor', 'turn', 'interrupt', 'asked', 'nudge', 'meter',
-    'error', 'unheard', 'took']) {
+    'error', 'unheard', 'took', 'stalled', 'tool']) {
     director.on(name, (payload) => events.push({ name, payload }));
   }
 
@@ -277,6 +277,146 @@ describe('pausing', () => {
   });
 });
 
+/**
+ * The failure this whole section is about: a debate that is running, and nobody
+ * saying anything, ever again. Every route to it ends with an ask that was
+ * declined and nothing left armed to try again — so the tests below set up one
+ * of those routes each, and then insist that something happens anyway.
+ */
+describe('a debate that gets stuck', () => {
+  let h;
+
+  beforeEach(() => { h = harness(); });
+  afterEach(() => {
+    h.director.stop();
+    h.restore();
+  });
+
+  /**
+   * The moderator talks over a lectern mid-answer. The next ask waits for that
+   * answer to die — and the answer dies without a `done` to say so, which is
+   * what a refused frame or a dropped response looks like from here.
+   */
+  async function stuckOnACancelledAnswer() {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.emit('speech', { started: false });
+    h.egg.speak();
+    h.egg.busy = true;
+
+    h.director.say('come off it', { to: 'egg' });
+
+    h.egg.busy = false;
+    h.egg.state = 'listening';
+    h.bus.say('egg', 0);
+  }
+
+  it('notices, says so, and asks whoever was up next', async () => {
+    await stuckOnACancelledAnswer();
+    const before = h.egg.asks.length;
+
+    h.tick();
+    h.tick(10_000);
+
+    assert.deepEqual(h.seen('stalled'), [{ id: 'egg' }]);
+    assert.ok(h.egg.asks.length > before, 'nobody was ever asked again');
+  });
+
+  it('gives it a while first — a quiet gap is not a stall', async () => {
+    await stuckOnACancelledAnswer();
+    const before = h.egg.asks.length;
+
+    h.tick();
+    h.tick(4000);
+
+    assert.deepEqual(h.seen('stalled'), []);
+    assert.equal(h.egg.asks.length, before);
+  });
+
+  it('does not count a lectern that is still talking as nothing happening', async () => {
+    await stuckOnACancelledAnswer();
+    h.egg.state = 'speaking';
+
+    h.tick();
+    h.tick(10_000);
+
+    assert.deepEqual(h.seen('stalled'), []);
+  });
+
+  it('does not count audio still playing out as nothing happening', async () => {
+    await stuckOnACancelledAnswer();
+    h.bus.say('egg', 0.4);
+
+    h.tick();
+    h.tick(10_000);
+
+    assert.deepEqual(h.seen('stalled'), []);
+  });
+
+  it('starts counting again from scratch once something happens', async () => {
+    await stuckOnACancelledAnswer();
+
+    h.tick();
+    h.tick(6000);
+    /** Somebody speaks: whatever the last six seconds were, they were not this. */
+    h.egg.state = 'speaking';
+    h.tick();
+    h.egg.state = 'listening';
+    h.tick(4000);
+
+    assert.deepEqual(h.seen('stalled'), []);
+  });
+
+  /**
+   * `pending` is the director's note that it asked for an answer. A response
+   * that is refused upstream never comes back to clear it, and every later ask
+   * for that lectern is then declined on the strength of a note about an answer
+   * that is not coming.
+   */
+  it('stops waiting on an answer the session says was refused', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    assert.equal(h.egg.asks.length, 1);
+
+    h.egg.emit('error', { message: 'conversation already has an active response' });
+    h.egg.emit('speech', { started: false });
+
+    /** Their turn comes round again, and this time it is taken. */
+    h.potato.speak();
+    h.potato.finish();
+    h.bus.say('potato', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.egg.asks.length, 2, 'the lectern was still marked as owing an answer');
+  });
+
+  it('believes the session over itself about whether one is in flight', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+
+    /** An error while a response really is running changes nothing. */
+    h.egg.busy = true;
+    h.egg.emit('error', { message: 'rate limit reached' });
+    h.egg.emit('speech', { started: false });
+
+    h.potato.speak();
+    h.potato.finish();
+    h.bus.say('potato', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.egg.asks.length, 1, 'asked for a second answer over the top of one');
+  });
+
+  it('hangs up rather than waiting on a lectern that has gone away', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.potato.connected = false;
+
+    h.tick();
+
+    assert.equal(h.director.phase, 'over');
+    assert.match(h.seen('phase').at(-1).why, /dropped out/);
+  });
+});
+
 describe('cutting in', () => {
   let h;
 
@@ -471,5 +611,61 @@ describe('the moderator', () => {
 
     const said = h.seen('turn').filter((t) => t.speaker === 'moderator');
     assert.equal(said.filter((t) => t.content === 'both of you, briefly').length, 1);
+  });
+});
+
+describe('a microphone both of them are transcribing', () => {
+  let h;
+
+  beforeEach(() => { h = harness({ mic: { open: true, live: true } }); });
+
+  afterEach(() => {
+    h.director.stop();
+    h.restore();
+  });
+
+  /** The moderator asks something, and then stops talking. */
+  async function asks(...fragments) {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+
+    for (const [id, text] of fragments) h[id].emit('heard', text);
+
+    h.bus.say('moderator', 0);
+    h.tick();
+    h.tick(2000);
+  }
+
+  const said = () => h.seen('turn').filter((t) => t.speaker === 'moderator').slice(1);
+
+  /**
+   * One session fills its transcript out as it goes, and the finished line lands
+   * after the room has gone quiet. A later, fuller version of the same line is
+   * not a second copy of it.
+   */
+  it('takes the fullest version of the line, not the first fragment', async () => {
+    await asks(['egg', 'Marc'], ['egg', 'Marc, is that not just']);
+    h.egg.emit('heard', 'Marc, is that not just rent control by another name?');
+
+    assert.deepEqual(said().map((t) => t.content),
+      ['Marc, is that not just rent control by another name?']);
+  });
+
+  it('logs it once, however many sessions transcribed it', async () => {
+    await asks(['egg', 'what about the money?']);
+    h.potato.emit('heard', 'what about the money');
+
+    assert.deepEqual(said().map((t) => t.content), ['what about the money?']);
+  });
+
+  it('hands it to whoever was named in it', async () => {
+    await asks(['egg', 'Tater, answer that']);
+    h.potato.emit('heard', 'Tater, answer that');
+    h.potato.emit('speech', { started: false });
+
+    assert.equal(h.potato.asks.length, 1);
+    assert.equal(h.egg.asks.length, 1, 'the opening was the only thing Marc was asked for');
   });
 });

@@ -2,7 +2,7 @@
   "name": "debater",
   "version": "0.1.0",
   "private": true,
-  "description": "Two OpenAI Realtime voice agents — an egg and a potato — debating each other at two podiums, with you as the moderator",
+  "description": "Two realtime voice agents — an egg and a potato — debating each other at two podiums, with you as the moderator, on OpenAI or xAI",
   "type": "module",
   "engines": {
     "node": ">=22.12"
@@ -18,7 +18,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

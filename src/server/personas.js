@@ -28,6 +28,8 @@ export const DEBATERS = Object.freeze({
     label: 'Tater the Potato',
     side: 'left',
     leaning: 'Democrat',
+    /** For a lectern too narrow to hold the whole word — see `styles.css`. */
+    leaningShort: 'Dem',
     accent: '#2f5d92',
     voice: 'cedar',
     persona: `Assume the personality of a potato named Tater, arguing the Democratic side of tonight's debate. Roleplay and never break character.
@@ -45,6 +47,7 @@ How you sound: slow, concrete, and moral. You reach for a real example — a per
     label: 'Marc the Egg',
     side: 'right',
     leaning: 'Republican',
+    leaningShort: 'Rep',
     accent: '#8e3232',
     voice: 'ash',
     persona: `Assume the personality of an egg named Marc, arguing the Republican side of tonight's debate. Roleplay and never break character.

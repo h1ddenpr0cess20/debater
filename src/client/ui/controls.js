@@ -61,6 +61,7 @@ export function createControls({
   onMic,
   onToggle,
   onStop,
+  onEngineChange,
   onModelChange,
   onVoiceChange,
   onCaps,
@@ -74,6 +75,7 @@ export function createControls({
   const startEl = root.querySelector('#start');
   const pauseEl = root.querySelector('#pause');
   const stopEl = root.querySelector('#stop');
+  const engineEl = root.querySelector('#engine');
   const modelEl = root.querySelector('#model');
   const voicesEl = root.querySelector('#voices');
   const heckleEl = root.querySelector('#heckle');
@@ -84,6 +86,55 @@ export function createControls({
   const voiceEls = new Map();
   /** No catalog means no calls to make, and `sync` must not undo saying so. */
   let unavailable = false;
+  /** The roster, kept so the voice pickers can be rebuilt for another engine. */
+  let debaters = [];
+  let engines = new Map();
+
+  /**
+   * The model and voice pickers, rebuilt for one engine.
+   *
+   * Both lists belong to the engine rather than to the app — a Grok voice is not
+   * an OpenAI voice and neither will answer to the other's name — so switching
+   * engine throws both away and builds them again. Two debaters in the same
+   * voice is the fastest way to make a debate unlistenable, so there is one
+   * picker per lectern rather than one shared.
+   */
+  function useEngine(id) {
+    const engine = engines.get(id);
+    const models = engine?.models ?? [];
+    const voices = engine?.voices ?? [];
+
+    modelEl.replaceChildren(...models.map((m) => option(doc, m.display_name ?? m.id, m.id)));
+    const chosen = models.some((m) => m.id === engine.model) ? engine.model : models[0]?.id ?? '';
+    modelEl.value = chosen;
+
+    voicesEl.replaceChildren();
+    voiceEls.clear();
+    const picked = {};
+    for (const one of debaters) {
+      const wanted = engine?.voices_for?.[one.id];
+      const label = doc.createElement('label');
+      label.className = 'voice chip';
+      label.dataset.debater = one.id;
+      label.style.setProperty('--accent', one.accent);
+      label.append(one.name);
+
+      const select = doc.createElement('select');
+      select.id = `voice-${one.id}`;
+      select.setAttribute('aria-label', `${one.name}'s voice`);
+      select.replaceChildren(...voices.map((v) => option(doc, v)));
+      select.value = voices.includes(wanted) ? wanted : voices[0];
+      select.addEventListener('change', () => onVoiceChange(one.id, select.value));
+
+      label.append(select);
+      voicesEl.append(label);
+      voiceEls.set(one.id, select);
+      picked[one.id] = select.value;
+    }
+
+    sync();
+    return { engine: id, model: chosen, voices: picked, switches: engine?.switches ?? [] };
+  }
 
   function sync() {
     const { phase, mic } = getStatus();
@@ -111,6 +162,9 @@ export function createControls({
     micEl.setAttribute('aria-label', mic ? 'Close the moderator microphone' : 'Open the moderator microphone');
 
     topicEl.disabled = unavailable;
+    /** Which engine a debate runs on is settled when the calls go out, so it is
+     *  a choice you make between debates rather than during one. */
+    engineEl.disabled = unavailable || !idle;
     modelEl.disabled = unavailable || !idle;
     turnsEl.disabled = !idle;
     minutesEl.disabled = !idle;
@@ -166,6 +220,9 @@ export function createControls({
 
   modelEl.addEventListener('change', () => onModelChange(modelEl.value));
 
+  /** A different engine is a different set of calls: the page rebuilds around it. */
+  engineEl.addEventListener('change', () => onEngineChange(useEngine(engineEl.value)));
+
   heckleEl.addEventListener('click', () => {
     const on = heckleEl.getAttribute('aria-pressed') !== 'true';
     heckleEl.setAttribute('aria-pressed', String(on));
@@ -199,49 +256,34 @@ export function createControls({
     },
 
     /**
-     * What the server offers, and one voice picker per lectern. Two debaters in
-     * the same voice is the fastest way to make a debate unlistenable, so the
-     * pickers are built from the roster rather than shared.
+     * What the server offers.
+     *
+     * The engine picker is only shown when there is a choice to make: a server
+     * with one key set has one engine that can take a call, and a disabled
+     * dropdown next to the model is a question nobody asked.
      */
-    setCatalog({ models, model, voices, debaters, caps: limits }) {
-      modelEl.replaceChildren(...models.map((m) => option(doc, m.display_name ?? m.id, m.id)));
-      const chosen = models.some((m) => m.id === model) ? model : models[0].id;
-      modelEl.value = chosen;
+    setCatalog(catalog) {
+      debaters = catalog.debaters;
 
-      voicesEl.replaceChildren();
-      voiceEls.clear();
-      const picked = {};
-      for (const one of debaters) {
-        const label = doc.createElement('label');
-        label.className = 'voice chip';
-        label.dataset.debater = one.id;
-        label.style.setProperty('--accent', one.accent);
-        label.append(one.name);
+      const usable = catalog.engines.filter((one) => one.ready);
+      engineEl.replaceChildren(...usable.map((one) => option(doc, one.label, one.id)));
+      engineEl.hidden = usable.length < 2;
+      engineEl.value = usable.some((one) => one.id === catalog.engine)
+        ? catalog.engine
+        : usable[0].id;
 
-        const select = doc.createElement('select');
-        select.id = `voice-${one.id}`;
-        select.setAttribute('aria-label', `${one.name}'s voice`);
-        select.replaceChildren(...voices.map((v) => option(doc, v)));
-        select.value = voices.includes(one.voice) ? one.voice : voices[0];
-        select.addEventListener('change', () => onVoiceChange(one.id, select.value));
-
-        label.append(select);
-        voicesEl.append(label);
-        voiceEls.set(one.id, select);
-        picked[one.id] = select.value;
+      if (catalog.caps) {
+        pick(turnsEl, catalog.caps.turns, (n) => `${n} turns`);
+        pick(minutesEl, Math.max(1, Math.round(catalog.caps.seconds / MINUTE)), (n) => `${n} min`);
       }
 
-      if (limits) {
-        pick(turnsEl, limits.turns, (n) => `${n} turns`);
-        pick(minutesEl, Math.max(1, Math.round(limits.seconds / MINUTE)), (n) => `${n} min`);
-      }
-
-      sync();
-      return { model: chosen, voices: picked, caps: caps() };
+      engines = new Map(catalog.engines.map((one) => [one.id, one]));
+      return { ...useEngine(engineEl.value), caps: caps() };
     },
 
     catalogUnavailable() {
       unavailable = true;
+      engineEl.hidden = true;
       modelEl.replaceChildren(option(doc, 'unavailable', ''));
       voicesEl.replaceChildren();
       sync();

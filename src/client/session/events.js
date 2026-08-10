@@ -1,3 +1,37 @@
+import { decodePCM } from './codec.js';
+
+/**
+ * The hosted tools, named by the events they raise rather than by a declaration.
+ *
+ * Only the xAI engine gets here: its tools run inside the model's own turn, so
+ * there is no call to answer and no result to hand back — the only trace in the
+ * page is the event stream saying one is under way. Which is worth a caption: a
+ * debater who pauses for two seconds and comes back with a number was doing
+ * something, and the room should be able to see what.
+ */
+const TOOL_HINTS = [
+  [/web_search/, 'searching the web'],
+  [/x_search/, 'reading X'],
+  [/file_search/, 'searching files'],
+  /** `\bmcp\b` would not do: the event is `response.mcp_call.…`, and `_` is a
+   *  word character, so there is no boundary on the right of it to match. */
+  [/\bmcp/, 'using a tool'],
+];
+
+function hostedTool(type) {
+  for (const [re, label] of TOOL_HINTS) if (re.test(type)) return label;
+  return null;
+}
+
+/**
+ * One lectern's event stream, whichever engine it came from.
+ *
+ * The two engines differ in how audio travels and in nothing else that matters
+ * here. OpenAI's arrives on a media track the browser plays for us, so `play`
+ * and the rest are left at their defaults and the audio events are only ever a
+ * cue for the state machine. xAI's arrives in this stream as PCM, so the page is
+ * handed it and has to schedule it — which is what the three audio hooks are.
+ */
 export function createEventHandler({
   setState,
   emit,
@@ -5,6 +39,9 @@ export function createEventHandler({
   messages,
   getModel,
   onFunctionCall = () => {},
+  play = () => {},
+  flushAudio = () => {},
+  playing = () => false,
 }) {
   let responding = false;
   let transcript = '';
@@ -48,7 +85,20 @@ export function createEventHandler({
 
   function handle(event) {
     switch (event.type) {
+      /** The xAI engine's proxy, saying the call upstream is actually up. */
+      case 'proxy.ready':
+        emit('ready', { model: event.model, voice: event.voice });
+        break;
+
+      /**
+       * Somebody has started talking at this lectern — the other one, or the
+       * moderator over the top of everything. The session is dialled to let
+       * that cut its own answer off, so anything of ours still scheduled to
+       * play is no longer going to be said, and holding on to it would have
+       * this lectern finish a sentence the far end has already abandoned.
+       */
       case 'input_audio_buffer.speech_started':
+        if (playing()) flushAudio();
         flush();
         emit('speech', { started: true });
         setState('listening');
@@ -70,10 +120,18 @@ export function createEventHandler({
         setState('thinking');
         break;
 
+      /**
+       * On the OpenAI engine there is nothing on these but the cue: the samples
+       * came in on the media track and are already playing. On xAI the samples
+       * are the event.
+       */
       case 'response.output_audio.delta':
-      case 'response.audio.delta':
+      case 'response.audio.delta': {
+        const samples = decodePCM(event.delta);
+        if (samples) play(samples);
         setState('speaking');
         break;
+      }
 
       case 'response.output_audio_transcript.delta':
       case 'response.audio_transcript.delta':
@@ -82,6 +140,12 @@ export function createEventHandler({
         setState('speaking');
         transcript += event.delta;
         emit('text', event.delta);
+        break;
+
+      /** What this lectern made of what it heard, while it is still hearing it. */
+      case 'conversation.item.input_audio_transcription.updated':
+      case 'input_audio_transcription.updated':
+        if (event.transcript) emit('user', event.transcript);
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
@@ -111,13 +175,21 @@ export function createEventHandler({
           fail(response.status_details?.error?.message ?? 'the response failed');
         }
         emit('done', { model: getModel(), usage: response.usage });
-        setState('listening');
+        /** Generation is over; the audio may not be. On the engine that plays
+         *  its own samples, "speaking" lasts as long as there are samples. */
+        if (!playing()) setState('listening');
         break;
       }
 
       case 'error':
         fail(event.error?.message ?? 'realtime error');
         break;
+
+      default: {
+        const label = hostedTool(event.type);
+        if (!label) break;
+        emit('tool', /\.(done|completed|failed)$/.test(event.type) ? null : label);
+      }
     }
   }
 

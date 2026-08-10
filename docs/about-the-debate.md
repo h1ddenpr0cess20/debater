@@ -26,19 +26,24 @@ not sourced, and it is not evidence of anything except that a model can hold a
 position for eight minutes. If something one of them says sounds like a fact
 worth repeating, go and find out whether it is one.
 
-This is also why the connector worth building first is web search. A debate
-where either side can be asked to produce a source is a different and better
-thing than this one.
+That is less true on the xAI engine than on the OpenAI one, and it is the reason
+that engine is here. Web and X search are on by default there, so either side
+can be asked to produce a source and will go and look — which makes for a
+different and better debate. It does not make either of them right. A model that
+has read something is a model that can now misread it with a citation attached,
+and you should still check.
 
 ## The transcript
 
 Debates are kept in this browser's local storage, turn by turn, so you can read
-one back or pick it up again. They are never sent anywhere but back to OpenAI as
-context when you continue one. `clear` in the log panel deletes them.
+one back or pick it up again. They are never sent anywhere but back to whichever
+provider the lecterns are running on, as context, when you continue one. `clear`
+in the log panel deletes them.
 
 ## Your microphone
 
 The moderator's microphone is open only while you have switched it on, and what
-it picks up goes to OpenAI as the input to both calls — the same as any voice
-app. It is not recorded here. Echo cancellation is on, because both debaters are
+it picks up goes to the provider as the input to both calls — the same as any
+voice app. It is not recorded here, and on the xAI engine it passes through this
+server without being kept. Echo cancellation is on, because both debaters are
 coming out of your speakers while it is open.

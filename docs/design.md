@@ -2,28 +2,55 @@
 
 ## Two calls, no microphone between them
 
-Each debater is an ordinary OpenAI Realtime call, run browser-to-OpenAI over
-WebRTC. The only unusual thing is what goes down the wire as their microphone.
+Each debater is an ordinary realtime call. The only unusual thing is what goes
+down the wire as their microphone.
 
 The audio bus ([`src/client/audio/bus.js`](../src/client/audio/bus.js)) gives
-each of them a `MediaStreamDestination` node with nothing connected to it. Its
-track exists at handshake time and carries silence, which is what the peer
-connection is handed. What eventually feeds it is the *other* debater's voice,
-arriving over their own call, through a gain node:
+each of them an `ear`: a gain node with nothing connected to it, which therefore
+exists at handshake time and carries silence. What eventually feeds it is the
+*other* debater's voice, arriving over their own call, through a gate:
 
 ```
-egg's remote audio ──▶ gate(egg→potato) ──▶ potato's feed ──▶ potato's peer connection
-potato's remote audio ─▶ gate(potato→egg) ─▶ egg's feed ────▶ egg's peer connection
-moderator's mic ──────▶ gate(mod→egg), gate(mod→potato)
+egg's voice ─────▶ gate(egg→potato) ──▶ potato's ear ──▶ what potato hears
+potato's voice ──▶ gate(potato→egg) ──▶ egg's ear ─────▶ what egg hears
+moderator's mic ─▶ gate(mod→egg), gate(mod→potato)
 ```
 
 Every hop is a gate. Handing the floor over is one gate opening and one
 shutting; one debater talking over the other is both open at once; pausing is
 all of them shut.
 
-Playback is through an `<audio>` element rather than through the graph, because
-Chrome will not pull samples out of a remote stream that has no sink attached —
-and the bus needs those samples, since the relay is made of them.
+## The two engines
+
+The ear is where the engines part company, and it is the only place they do.
+
+**OpenAI** runs browser-to-OpenAI over WebRTC. The ear feeds a
+`MediaStreamDestination` whose track is what the peer connection is handed at
+the handshake. Their voice comes back on a media track, and is played through an
+`<audio>` element rather than through the graph — Chrome will not pull samples
+out of a remote stream that has no sink attached, and the bus needs those
+samples, since the relay is made of them.
+
+**xAI** runs browser to this server to xAI, over a WebSocket at `/realtime`, one
+per lectern. There is no client secret to mint — an xAI realtime session wants
+the API key on it — so the proxy holds the key and sits in the middle of both
+calls, which also makes it the thing that decides what a lectern's persona and
+tools are. Audio is PCM16 at 24 kHz in the event stream both ways: an audio
+worklet reads the ear and resamples it into frames going up, and what comes back
+is scheduled into a gain node that is both what the room hears and what the bus
+relays. No media track, no `<audio>` element, same gates.
+
+`live(id, false)` — what a pause does — deadens the ear and disables the track,
+because between them that is "this lectern hears nothing and sends nothing" on
+either engine.
+
+Above the ear nothing knows which is running.
+[`session/agent.js`](../src/client/session/agent.js) and
+[`session/xai.js`](../src/client/session/xai.js) present the same surface to the
+director and emit the same events in the same order, and
+[`session/events.js`](../src/client/session/events.js) is one handler for both —
+the audio hooks it takes are simply not given on the engine whose audio it never
+touches.
 
 ## Nobody answers on their own
 
@@ -31,6 +58,14 @@ Both sessions are minted with `turn_detection.create_response: false`. Turn
 detection still runs — it commits the input buffer, and it still interrupts —
 but no response is ever created by it. Every answer in the room is one the
 director asked for.
+
+On the xAI engine the proxy does not take that flag on trust. It counts the
+`response.create` frames the page sends against the `response.created` events
+coming back, and cancels one nobody asked for. It is there because the failure
+would otherwise be silent and expensive: both models would answer every sentence
+the other said and answer the moderator in chorus, and the page — which cannot
+tell a response it asked for from one it did not — would carry on as though it
+were driving.
 
 That one setting is what the rest hangs off:
 
@@ -48,16 +83,35 @@ That one setting is what the rest hangs off:
   them off when the objection lands. It sounds like being talked over because it
   is being talked over.
 
-The cost of driving it this way is a retry: a `response.create` that never
-becomes audio would end the debate silently. So the director waits six seconds
-and, if nothing has started, hands the other one's last words over as text.
+The cost of driving it this way is that the debate only continues if something
+asks it to. Two things guard that.
+
+The first is a retry: a `response.create` that never becomes audio would end the
+debate silently, so the director waits six seconds and, if nothing has started,
+hands the other one's last words over as text.
+
+The second is a watchdog, because the retry only covers a turn that was asked
+for. Every hand-over ends in `ask`, and `ask` can decline — they are answering
+already, or they still owe an answer that was refused upstream and will never
+arrive to clear the flag saying so. A decline leaves nothing armed, and the room
+goes quiet for good. So `stalled()` asks the stronger question: not "is it
+quiet" — quiet is most of a hand-over — but "is there anything to be quiet for".
+No timer armed, neither lectern generating or playing audio out, no microphone
+mid-question. Nine seconds of that and the director clears what it thought it
+was owed, asks whoever is up next, and says so in the notice line.
+
+It is deliberately incurious about *why*. Anything that can silence a running
+debate that long with nothing pending is a bug, known or not, and the recovery
+is the same one either way. Its precondition is that the timers tell the truth,
+which is why they go through `arm`/`disarm` — a handle left behind after its
+timer fired reads as a plan that does not exist.
 
 ## Who is where
 
 ```
 main.js ──▶ stage/       the hall: two spots, two lecterns, two rigs
         ──▶ audio/bus    the gates
-        ──▶ session/     one Realtime call per lectern
+        ──▶ session/     one realtime call per lectern, on either engine
         ──▶ debate/      the director, the moderator, the transcript
         ──▶ ui/          the bar, the captions, the panels
 ```
@@ -88,11 +142,23 @@ renderer draws none and each rig moves a soft blot on the floor beneath itself.
 
 ## The server
 
-It is a proxy and a static host, and it never sees any audio. It lists the
-realtime models, mints one ten-minute client secret per lectern with that
-lectern's persona baked into it, and serves the build. State-changing requests
-are checked against the page's own origin, because there is no auth and a page
-in another tab should not be able to mint calls against your key.
+A static host, and a front end for whichever engine is running. It lists what
+can be dialled — the realtime models for OpenAI, a constant for xAI — and serves
+the build.
+
+For OpenAI it mints one ten-minute client secret per lectern with that lectern's
+persona baked into it, and sees no audio at all. For xAI it is in the middle of
+both calls: [`src/server/xai/proxy.js`](../src/server/xai/proxy.js) holds the
+key, builds each session from the lectern named in the query string, forwards
+audio in both directions, and answers for the floor. What the page may send
+upstream is an allowlist — a `session.update` of its own is dropped, and
+per-response `instructions` are stripped, because either would let a page
+replace the persona.
+
+State-changing requests are checked against the page's own origin, and so is the
+WebSocket upgrade: there is no auth here, the same-origin policy does not cover
+WebSockets at all, and a page in another tab should not be able to run a debate
+on your key.
 
 The personas are two blocks of prose and one block of shared rules in
 [`src/server/personas.js`](../src/server/personas.js). The rules are what keep

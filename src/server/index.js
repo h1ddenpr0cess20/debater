@@ -13,9 +13,11 @@ app.listen(config.port, () => {
   if (tls) {
     console.log(`        → ${scheme}://<this machine on the wifi>:${config.port}`);
   }
-  if (!config.apiKey) {
-    console.warn('OPENAI_API_KEY is not set — /api/* will fail until it is.');
+  if (!config.apiKey && !config.xai.apiKey) {
+    console.warn('neither OPENAI_API_KEY nor XAI_API_KEY is set — /api/* will fail until one is.');
   }
+  console.log(`engine → ${config.engine}`
+    + `${config.engine === 'xai' && !config.xai.apiKey ? ' (no XAI_API_KEY — it cannot dial)' : ''}`);
   const { turns, seconds } = config.caps;
   console.log(`caps → ${turns} turns, ${Math.round(seconds / 60)} minutes, then it hangs up`);
   const names = app.connectors.names;

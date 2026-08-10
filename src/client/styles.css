@@ -202,6 +202,11 @@ three-d-stage {
 .lectern .who {
   display: flex;
   align-items: center;
+  /** Two of these sit side by side in a two-column grid, and the line is three
+   *  uppercase words with letter-spacing on them. Wrapping is the backstop for
+   *  a width the abbreviation below still cannot fit: the two names may stack,
+   *  but they never end up on top of each other. */
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0;
   color: var(--accent);
@@ -209,6 +214,8 @@ three-d-stage {
 .lectern[data-debater="egg"] .who { justify-content: flex-end; }
 .lectern .name { color: color-mix(in srgb, var(--accent) 55%, #ffffff); }
 .lectern .party { color: rgba(255, 255, 255, .3); }
+/** The whole word by default; `Dem`/`Rep` once the lectern is too narrow for it. */
+.lectern .party .short { display: none; }
 .lectern .state {
   color: rgba(255, 255, 255, .28);
   transition: color .3s;
@@ -729,6 +736,17 @@ three-d-stage {
 #connectors-note.error { color: var(--error); }
 
 /* ── small screens ───────────────────────────────────────────────────────── */
+
+/**
+ * Two lecterns share one row, and each label is a name, a party and a state set
+ * in spaced uppercase. Somewhere around here the party word stops fitting beside
+ * the other two and the two labels start running into each other, so it gives up
+ * the six letters it can spare: Democrat and Republican become Dem and Rep.
+ */
+@media (max-width: 600px) {
+  .lectern .party .long { display: none; }
+  .lectern .party .short { display: inline; }
+}
 
 @media (max-width: 720px) {
   :root { --gutter: 14px; }

@@ -13,18 +13,25 @@ function fakeAnalyser(samples) {
 }
 
 describe('createAnalyser', () => {
-  it('holds on to the source it built', () => {
+  it('holds on to the source it was handed', () => {
     const source = { connect() { this.connected = true; } };
-    const audio = {
-      createAnalyser: () => ({ fftSize: 2048, smoothingTimeConstant: 0 }),
-      createMediaStreamSource: () => source,
-    };
+    const audio = { createAnalyser: () => ({ fftSize: 2048, smoothingTimeConstant: 0 }) };
 
-    const node = createAnalyser(audio, {});
+    const node = createAnalyser(audio, source);
 
     assert.equal(node.source, source, 'the source node is unreferenced');
     assert.equal(source.connected, true);
     assert.equal(node.buffer.length, node.fftSize);
+  });
+
+  /** Whichever engine is running, the meter is handed a node and nothing else. */
+  it('takes any node, not only one built from a stream', () => {
+    const audio = { createAnalyser: () => ({ fftSize: 1024, smoothingTimeConstant: 0 }) };
+    const gain = { outputs: [], connect(node) { this.outputs.push(node); } };
+
+    const node = createAnalyser(audio, gain);
+
+    assert.deepEqual(gain.outputs, [node]);
   });
 });
 

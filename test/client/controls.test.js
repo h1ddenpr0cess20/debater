@@ -4,16 +4,40 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { MOTIONS, createControls } from '../../src/client/ui/controls.js';
 import { loadPage } from '../helpers/dom.js';
 
-const CATALOG = {
-  models: [{ id: 'gpt-realtime-2.1', display_name: 'gpt-realtime-2.1' }, { id: 'other-realtime' }],
+const OPENAI = {
+  id: 'openai',
+  label: 'OpenAI Realtime',
+  ready: true,
   model: 'gpt-realtime-2.1',
+  models: [{ id: 'gpt-realtime-2.1', display_name: 'gpt-realtime-2.1' }, { id: 'other-realtime' }],
   voices: ['ash', 'cedar', 'verse'],
+  voices_for: { potato: 'cedar', egg: 'ash' },
+  switches: [],
+};
+
+const XAI = {
+  id: 'xai',
+  label: 'xAI Grok Voice',
+  ready: true,
+  model: 'grok-voice-latest',
+  models: [{ id: 'grok-voice-latest' }],
+  voices: ['atlas', 'orion', 'rex'],
+  voices_for: { potato: 'atlas', egg: 'orion' },
+  switches: [{ name: 'web_search', label: 'web search' }],
+};
+
+const CATALOG = {
+  engine: 'openai',
+  engines: [OPENAI, XAI],
   debaters: [
-    { id: 'potato', name: 'Tater', accent: '#2f5d92', voice: 'cedar' },
-    { id: 'egg', name: 'Marc', accent: '#8e3232', voice: 'ash' },
+    { id: 'potato', name: 'Tater', accent: '#2f5d92' },
+    { id: 'egg', name: 'Marc', accent: '#8e3232' },
   ],
   caps: { turns: 9, seconds: 300 },
 };
+
+/** One engine to pick from is not a choice, and the picker says so by hiding. */
+const ONE_ENGINE = { ...CATALOG, engines: [OPENAI, { ...XAI, ready: false }] };
 
 describe('createControls', () => {
   let page;
@@ -33,6 +57,7 @@ describe('createControls', () => {
       onMic: () => calls.push(['mic']),
       onToggle: () => calls.push(['toggle']),
       onStop: (why) => calls.push(['stop', why]),
+      onEngineChange: (chosen) => calls.push(['engine', chosen]),
       onModelChange: (model) => calls.push(['model', model]),
       onVoiceChange: (id, voice) => calls.push(['voice', id, voice]),
       onCaps: (caps) => calls.push(['caps', caps]),
@@ -185,5 +210,64 @@ describe('createControls', () => {
     assert.equal(page.$('#start').disabled, true);
     assert.equal(page.$('#mic').disabled, true);
     assert.equal(page.$('#model').textContent, 'unavailable');
+  });
+
+  describe('the engine picker', () => {
+    it('offers the engines this server can actually dial', () => {
+      const chosen = controls.setCatalog(CATALOG);
+      assert.equal(chosen.engine, 'openai');
+      assert.equal(page.$('#engine').hidden, false);
+      assert.deepEqual([...page.$('#engine').options].map((o) => o.value), ['openai', 'xai']);
+    });
+
+    /** One engine is not a choice, and a dropdown with one entry is a question
+     *  nobody asked. */
+    it('stays out of the way when only one engine has a key', () => {
+      controls.setCatalog(ONE_ENGINE);
+      assert.equal(page.$('#engine').hidden, true);
+    });
+
+    it('opens on the engine the server named', () => {
+      const chosen = controls.setCatalog({ ...CATALOG, engine: 'xai' });
+      assert.equal(chosen.engine, 'xai');
+      assert.equal(page.$('#engine').value, 'xai');
+      assert.equal(chosen.model, 'grok-voice-latest');
+    });
+
+    it('opens on one that can dial when the named one cannot', () => {
+      const chosen = controls.setCatalog({ ...ONE_ENGINE, engine: 'xai' });
+      assert.equal(chosen.engine, 'openai');
+    });
+
+    it('rebuilds the models and both voices around whichever is picked', () => {
+      controls.setCatalog(CATALOG);
+      page.$('#engine').value = 'xai';
+      page.$('#engine').dispatchEvent(new page.window.Event('change'));
+
+      const [, chosen] = calls.at(-1);
+      assert.equal(chosen.engine, 'xai');
+      assert.equal(chosen.model, 'grok-voice-latest');
+      assert.deepEqual(chosen.voices, { potato: 'atlas', egg: 'orion' });
+      assert.deepEqual([...page.$('#voice-egg').options].map((o) => o.value), XAI.voices);
+      assert.deepEqual([...page.$('#model').options].map((o) => o.value), ['grok-voice-latest']);
+    });
+
+    /** The tools panel is built from whatever comes back here. */
+    it('hands over the switches belonging to the engine picked', () => {
+      assert.deepEqual(controls.setCatalog(CATALOG).switches, []);
+
+      page.$('#engine').value = 'xai';
+      page.$('#engine').dispatchEvent(new page.window.Event('change'));
+      assert.deepEqual(calls.at(-1)[1].switches, XAI.switches);
+    });
+
+    it('is not something you change mid-debate', () => {
+      controls.setCatalog(CATALOG);
+      assert.equal(page.$('#engine').disabled, false);
+
+      status.phase = 'running';
+      controls.sync();
+      assert.equal(page.$('#engine').disabled, true);
+    });
   });
 });
