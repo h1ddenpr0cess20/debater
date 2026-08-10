@@ -147,9 +147,17 @@ function wire() {
   director.on('state', ({ id, state }) => {
     rigs[id]?.setState(state);
     hud.setState(id, state);
-    /** A new turn starts on a clean caption, not on top of the last one. */
-    if (state === 'thinking') hud.clearCaption(id);
   });
+
+  /**
+   * A new turn starts on a clean caption, and nothing else clears one.
+   *
+   * Not on "thinking": hearing the other side speak is what puts a lectern into
+   * that state, so clearing there wiped what somebody had just said the instant
+   * their opponent opened their mouth — which is exactly when you want to read
+   * it. Being asked to answer is the only moment their own last turn is over.
+   */
+  director.on('asked', ({ id }) => hud.clearCaption(id));
 
   director.on('level', ({ id, level }) => {
     if (id === MODERATOR) {
