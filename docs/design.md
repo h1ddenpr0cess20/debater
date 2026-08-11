@@ -187,6 +187,23 @@ wander, plus a margin. Nothing may pass through the furniture, and
 There is no shadow map. A lumpy body throws one that crawls as it turns, so the
 renderer draws none and each rig moves a soft blot on the floor beneath itself.
 
+The room they stand in is a cast iron frying pan
+([`src/client/stage/pan.js`](../src/client/stage/pan.js)), turned out of one
+profile: base, the roll up into the wall, the flare, and the bead the rim is
+folded into, with a handle off the back. It is the floor and the backdrop at
+once — the wall closes the room off from every angle, which is what the
+cyclorama it replaced was for — and being solid iron from both sides rather
+than a one-sided wall, it is also something the camera can end up behind.
+
+So the pan owns two rules about the shot, and
+[`test/client/pan.test.js`](../test/client/pan.test.js) is what says so. Both
+spots have to stand on the flat of it, off the roll. And the near rim may never
+come up between the camera and a debater's feet: fitting a wide set into a tall
+window walks the camera clean out of the pan, so the framing raises the shot
+until it sees over the rim, and how far down the shot may be dragged is capped
+by how far out it has been dragged. From inside the pan there is nothing in the
+way and the cap is the one the stage came with.
+
 ## The server
 
 A static host, and a front end for whichever engine is running. It lists what
