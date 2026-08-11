@@ -590,6 +590,31 @@ describe('the moderator', () => {
     assert.equal(h.bus.isOpen('moderator', 'potato'), true);
   });
 
+  /**
+   * The moderator reaches both lecterns down the same wire the opposite lectern
+   * does, as the same kind of turn. Nothing in what arrives says which it is, so
+   * a question from the floor was answered as though the other lectern had
+   * asked it — this is the only thing that says otherwise, and it has to go
+   * over before the audio is committed at the far end.
+   */
+  it('tells both of them whose voice they are about to hear', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    mic.live = true;
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+
+    for (const agent of [h.egg, h.potato]) {
+      assert.match(agent.sent.at(-1).text, /^\[moderator\] I have the floor/);
+      assert.equal(agent.sent.at(-1).answer, false, 'the marker was answered rather than read');
+    }
+
+    const said = h.egg.sent.length;
+    h.tick();
+    h.tick();
+    assert.equal(h.egg.sent.length, said, 'said again for a turn they already had');
+  });
+
   it('takes the floor off both of them once you actually say something', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.speak();
@@ -771,6 +796,29 @@ describe('the moderator', () => {
 
     h.egg.stopSpeaking();
     assert.equal(h.egg.asks.length, asked + 1, 'the question was never put to them');
+  });
+
+  /**
+   * The other half of the same thing. When a lectern never takes the audio in,
+   * the question is handed over in text — and it used to be handed over as the
+   * last thing the opposite lectern said, unmarked, which is the moderator's
+   * question arriving as the opponent's point and answered as one.
+   */
+  it('hands a question they never took in over as the moderator’s', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    mic.live = true;
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+    h.bus.say('moderator', 0);
+    h.tick();
+    h.tick(2000);
+    h.egg.emit('heard', 'Tater, what about the deficit?');
+
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+
+    assert.deepEqual(h.seen('unheard'), [{ id: 'potato' }]);
+    assert.match(h.potato.sent.at(-1).text, /^\[moderator\] Tater, what about the deficit\?/);
   });
 
   it('only logs the microphone once, however many sessions transcribed it', async () => {

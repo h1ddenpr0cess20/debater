@@ -2,6 +2,9 @@
 export const PRIOR_TURNS = 40;
 export const PRIOR_CHARS = 6000;
 
+/** Who said it, in the one form the far end can read it as. */
+const MODERATOR = 'moderator';
+
 /**
  * An earlier debate, seen from one lectern.
  *
@@ -12,6 +15,11 @@ export const PRIOR_CHARS = 6000;
  * record. They travel as turns rather than as a summary of turns, because that
  * is what the realtime API takes.
  *
+ * Which is why the moderator's turns are marked on the way through. Two roles
+ * cannot hold three speakers, so replayed without the label a question from the
+ * floor is a line the opposite lectern said — and a debate picked up out of the
+ * log starts by answering the moderator as though they were the opponent.
+ *
  * The oldest go first when there are too many: what was said last is what the
  * next sentence is most likely to follow from.
  */
@@ -21,7 +29,9 @@ export function prior(turns = [], self) {
     .slice(-PRIOR_TURNS)
     .map((turn) => ({
       role: turn.speaker === self ? 'assistant' : 'user',
-      content: String(turn.content).slice(0, PRIOR_CHARS),
+      content: turn.speaker === MODERATOR
+        ? `[${MODERATOR}] ${String(turn.content).slice(0, PRIOR_CHARS)}`
+        : String(turn.content).slice(0, PRIOR_CHARS),
     }));
 
   let total = kept.reduce((sum, turn) => sum + turn.content.length, 0);

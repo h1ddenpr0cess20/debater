@@ -130,6 +130,29 @@ is the same one either way. Its precondition is that the timers tell the truth,
 which is why they go through `arm`/`disarm` — a handle left behind after its
 timer fired reads as a plan that does not exist.
 
+## Three voices, two roles
+
+A conversation has `assistant` and `user`, and this room has three people in it.
+Each session's own turns are `assistant` and everything else is `user`, which is
+what makes the opposite lectern look like the person on the other end of an
+ordinary call — the whole trick of the app. It also means the moderator arrives
+in exactly the same shape as the opponent: same gate, same input buffer, same
+role at the far end. Nothing about what lands says which it was.
+
+So it is said out loud, every time, and the personas are told to read it:
+
+| | |
+|---|---|
+| a typed line | goes over marked `[moderator]` |
+| the microphone | a `[moderator]` line saying they have the floor goes over first, and the audio commits after it |
+| a line handed over in text | carries `[moderator]` or `[the other lectern]`, whichever actually said it |
+| a debate picked up out of the log | replays the moderator's turns marked, the lecterns' turns bare |
+
+Without the labels the far end does what it was told to do with anything it
+cannot place: treats it as the opponent. That is a question from the floor
+answered as though the other lectern had asked it, which is most of what a
+moderator says.
+
 ## Who is where
 
 ```

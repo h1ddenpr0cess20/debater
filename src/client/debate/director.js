@@ -94,6 +94,25 @@ export const CUT = {
 };
 
 /**
+ * What a line handed over in text says about who said it.
+ *
+ * Everything either lectern is given arrives in the one role a conversation has
+ * for somebody else, so the label is the whole of the difference between the
+ * person in the room and the model at the other lectern. The personas are told
+ * to read both of these and to read neither of them out.
+ */
+const FROM = {
+  [MODERATOR]: `[${MODERATOR}]`,
+  other: '[the other lectern]',
+};
+
+const mark = (from, text) => `${from === MODERATOR ? FROM[MODERATOR] : FROM.other} ${text}`;
+
+/** Said to both of them the moment the microphone takes the floor. */
+const MIC_MARK = `${FROM[MODERATOR]} I have the floor — the voice you are about`
+  + ' to hear is mine, not the other lectern\'s.';
+
+/**
  * One-off directions, sent as a line rather than as response instructions.
  *
  * Instructions on a response replace the session's instead of adding to them,
@@ -127,8 +146,14 @@ export function createDirector({
   const usage = Object.fromEntries(order.map((id) => [id, { input: 0, output: 0 }]));
   const quiet = {};
   const finished = Object.fromEntries(order.map((id) => [id, false]));
-  /** The last thing each of them said, for when the audio did not carry it. */
-  const last = Object.fromEntries(order.map((id) => [id, '']));
+  /**
+   * The last thing each of them said, for when the audio did not carry it —
+   * the moderator included, because a question from the floor is the thing most
+   * often left unheard and the least excusable to hand over as somebody else's.
+   */
+  const last = Object.fromEntries([...order, MODERATOR].map((id) => [id, '']));
+  /** And who that was, most recently. */
+  let spokeLast = null;
   /** Whether each of them has taken in what was said to them since. */
   const heardIt = Object.fromEntries(order.map((id) => [id, false]));
   /**
@@ -258,6 +283,25 @@ export function createDirector({
     micRoute();
   }
 
+  /**
+   * Says whose the next voice is.
+   *
+   * The moderator reaches a lectern down the same wire the opposite lectern
+   * does — same gate, same input buffer, the same `user` turn at the far end —
+   * and nothing in what arrives distinguishes a person in the room from the
+   * model they are arguing with. So the far end assumed what it was told to
+   * assume, and answered a question from the floor as though the other lectern
+   * had asked it.
+   *
+   * This is the only thing that can say otherwise, and it has to go over before
+   * the audio does. It does: the item is created when the microphone takes the
+   * floor, and their speech is not committed to the conversation until they
+   * stop talking.
+   */
+  function markModerator() {
+    for (const agent of agents) agent.send(MIC_MARK, { answer: false });
+  }
+
   function micRoute() {
     /** No microphone, or one whose channel is not on the bus yet: nothing to route. */
     if (!moderator?.open || !bus.get(MODERATOR)) return;
@@ -270,11 +314,21 @@ export function createDirector({
     route(id);
     disarm('ask');
     asked = null;
-    if (id !== MODERATOR) {
+    if (id === MODERATOR) markModerator();
+    else {
       spokenAt = now();
       running = '';
     }
     emit('floor', id);
+  }
+
+  /**
+   * Who last said something this lectern is owed an answer to. The moderator if
+   * they were the last to speak, and the opposite lectern otherwise — never
+   * this lectern itself, which is being handed the room, not its own words.
+   */
+  function spoke(to) {
+    return spokeLast && spokeLast !== to ? spokeLast : other(to);
   }
 
   /**
@@ -321,11 +375,17 @@ export function createDirector({
       if (phase !== 'running' || asked !== id) return;
       const again = roster[id];
       if (!again?.connected || again.busy || again.state === 'speaking') return;
-      /** Nothing came back. Hand over the words instead of the sound. */
-      const words = heard || last[other(id)];
+      /**
+       * Nothing came back. Hand over the words instead of the sound — whoever
+       * said them, marked as theirs. Unmarked and taken from the other lectern
+       * regardless, this answered the moderator's question by handing over the
+       * last thing the opposite lectern had said and calling it the room.
+       */
+      const from = spoke(id);
+      const words = last[from];
       emit('nudge', { id, spoken: Boolean(words) });
       pending[id] = false;
-      if (words) again.send(words);
+      if (words) again.send(mark(from, words));
       else again.say();
       pending[id] = true;
     });
@@ -405,10 +465,12 @@ export function createDirector({
       if (phase !== 'running' || waitingOn !== to) return;
       waitingOn = null;
       /** They never took it in. Say so — this is the failure that looks like
-       *  them ignoring each other — and hand the words over instead. */
+       *  them ignoring each other — and hand the words over instead, marked
+       *  with whoever actually said them. */
       emit('unheard', { id: to });
-      const words = last[other(to)];
-      if (words) roster[to]?.send(`[the other lectern] ${words}`, { answer: false });
+      const from = spoke(to);
+      const words = last[from];
+      if (words) roster[to]?.send(mark(from, words), { answer: false });
       ask(to, { direction });
     });
     return true;
@@ -487,7 +549,13 @@ export function createDirector({
      *  the question being answered — the one still queued is last week's. */
     question = null;
     const to = named(heard) ?? next ?? order[0];
-    if (heard) emit('turn', { speaker: MODERATOR, content: heard });
+    if (heard) {
+      /** In their own right, so a hand-over in text says the moderator asked
+       *  it rather than dressing it up as the other lectern's last point. */
+      last[MODERATOR] = heard;
+      spokeLast = MODERATOR;
+      emit('turn', { speaker: MODERATOR, content: heard });
+    }
     heard = '';
     heardFrom = null;
     route(to);
@@ -533,6 +601,7 @@ export function createDirector({
 
     agent.on('said', (turn) => {
       last[agent.id] = turn.content;
+      spokeLast = agent.id;
       emit('turn', turn);
     });
 
@@ -718,7 +787,9 @@ export function createDirector({
     const line = String(text ?? '').trim();
     if (!line || phase !== 'running') return false;
 
-    for (const agent of agents) agent.send(`[${MODERATOR}] ${line}`, { answer: false });
+    for (const agent of agents) agent.send(mark(MODERATOR, line), { answer: false });
+    last[MODERATOR] = line;
+    spokeLast = MODERATOR;
     emit('turn', { speaker: MODERATOR, content: line });
 
     const target = to ?? named(line) ?? next ?? order[0];
@@ -745,7 +816,9 @@ export function createDirector({
    * nothing for anybody to have heard first.
    */
   function announce(line, to, { direction } = {}) {
-    for (const agent of agents) agent.send(`[${MODERATOR}] ${line}`, { answer: false });
+    for (const agent of agents) agent.send(mark(MODERATOR, line), { answer: false });
+    last[MODERATOR] = line;
+    spokeLast = MODERATOR;
     emit('turn', { speaker: MODERATOR, content: line });
     route(to);
     ask(to, { direction });
@@ -794,7 +867,8 @@ export function createDirector({
       pending[id] = false;
       queued[id] = null;
     }
-    for (const id of order) last[id] = '';
+    for (const id of Object.keys(last)) last[id] = '';
+    spokeLast = null;
     startedAt = now();
     elapsed = 0;
     next = first;
