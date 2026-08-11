@@ -166,6 +166,21 @@ export function createDirector({
    */
   let heardFrom = null;
 
+  /**
+   * A typed question, waiting for the room to be quiet enough to put it.
+   *
+   * Typing is silent. There is nothing for anybody to have heard and nothing to
+   * talk over, so a line typed while one of them is mid-answer does not cut
+   * them off: it reaches both lecterns as it lands, and the answer to it is
+   * asked for once the answer under way has been given. Which is the same
+   * moment the floor would have changed hands anyway — the question only
+   * decides who it changes hands to.
+   *
+   * The microphone is the other thing entirely. A person talking *is* an
+   * interruption, their sessions treat it as one, and none of this applies.
+   */
+  let question = null;
+
   let phase = 'idle';
   let topic = '';
   let floor = null;
@@ -344,6 +359,36 @@ export function createDirector({
   }
 
   /**
+   * Whether anybody is mid-answer: owed one, generating one, or still saying
+   * one. All three are somebody's turn in progress, and a typed question waits
+   * for all three.
+   */
+  function midTurn() {
+    return order.some((id) => pending[id] || finished[id]
+      || roster[id]?.busy || roster[id]?.state === 'speaking');
+  }
+
+  /**
+   * Puts the moderator's waiting question to whoever it was aimed at.
+   *
+   * Called from every place a turn can end, because the end of a turn is what
+   * it has been waiting for. Answers whether it is off this file's hands —
+   * asked for, or shelved against an answer that is nearly over. It is kept
+   * rather than dropped otherwise: a question the room never gets round to is
+   * the failure this is a fix for.
+   */
+  function putQuestion() {
+    if (!question || phase !== 'running') return false;
+    const { to } = question;
+    disarm('hand');
+    floor = null;
+    route(to);
+    if (!ask(to) && !queued[to]) return false;
+    question = null;
+    return true;
+  }
+
+  /**
    * Hands the turn to one of them, once they have actually heard it.
    *
    * Their session says so by committing the incoming audio, which arrives here
@@ -381,6 +426,9 @@ export function createDirector({
     if (turns >= limits.turns) return stop(`that is ${turns} turns — the limit`);
     /** The person in the room is mid-sentence; they get the floor, not us. */
     if (floor === MODERATOR || timers.hand) return;
+    /** A question was typed while they were talking. This is the moment it was
+     *  waiting for, and it decides the floor instead of the order. */
+    if (putQuestion()) return;
     /** The second turn of a debate is the other one's opening statement, which
      *  is a reply as well — everything after that needs no telling. */
     handOver(other(id), turns === 1 ? { direction: DIRECTION.reply } : {});
@@ -389,6 +437,9 @@ export function createDirector({
   /** Whether the one listening should cut in over the one talking, right now. */
   function shouldCut(speaker) {
     if (!heckling || phase !== 'running' || floor !== speaker) return false;
+    /** The moderator is waiting on the end of this turn. Nobody else gets to
+     *  put another one in front of it. */
+    if (question) return false;
     if (turns < CUT.grace || turns - lastCut < CUT.cooldown) return false;
     if (now() - spokenAt < CUT.after) return false;
     /** One roll a second, so a long turn is not a hundred chances at it. */
@@ -432,6 +483,9 @@ export function createDirector({
   function finishHandBack() {
     disarm('hand');
     if (phase !== 'running') return;
+    /** They have said something since typing it, out loud, to the room. That is
+     *  the question being answered — the one still queued is last week's. */
+    question = null;
     const to = named(heard) ?? next ?? order[0];
     if (heard) emit('turn', { speaker: MODERATOR, content: heard });
     heard = '';
@@ -607,8 +661,11 @@ export function createDirector({
       pending[id] = false;
       queued[id] = null;
     }
-    const to = next ?? order[0];
+    /** A question waiting on a turn that never ended is what this is for as
+     *  much as anything: it goes out here rather than being forgotten. */
+    const to = question?.to ?? next ?? order[0];
     emit('stalled', { id: to });
+    if (putQuestion()) return;
     handOver(to);
   }
 
@@ -652,6 +709,10 @@ export function createDirector({
   /**
    * A line from the moderator, typed rather than spoken. Both of them are given
    * it, so both know it was said; one of them is asked to answer.
+   *
+   * Nobody is cut off for it, and nothing in flight is thrown away. Whoever is
+   * mid-answer finishes the answer — the room hears the end of the sentence it
+   * was in the middle of — and the question is put the moment they do.
    */
   function say(text, { to = null } = {}) {
     const line = String(text ?? '').trim();
@@ -661,53 +722,20 @@ export function createDirector({
     emit('turn', { speaker: MODERATOR, content: line });
 
     const target = to ?? named(line) ?? next ?? order[0];
-    /**
-     * Whoever was mid-answer is talked over, which is a moderator's privilege.
-     * Anything shelved for them is dropped first: the moderator has just said
-     * who is answering this, and cutting a lectern off is exactly the moment an
-     * ask waiting on them to stop would otherwise go out.
-     */
-    for (const agent of agents) {
-      if (agent.id === target) continue;
-      queued[agent.id] = null;
-      pending[agent.id] = false;
-      agent.cancel();
-    }
-
-    disarm('hand');
-    floor = null;
-    route(target);
+    question = { to: target };
+    /** However this ends up being put, they are the one who answers next. */
+    next = target;
 
     /**
-     * Nobody's turn ends on the back of this. Whoever was talking has just been
-     * cut off by the moderator, so the silence that follows is the moderator's
-     * doing — and handing the floor on for it would put a second question over
-     * the top of the one just asked.
+     * Straight out if the room is free — and the whole room, not just the one
+     * being asked. Asking them while the other is mid-answer is the same two
+     * voices at once by a different route.
      */
-    for (const id of order) {
-      finished[id] = false;
-      quiet[id] = null;
-    }
+    if (!midTurn() && putQuestion()) return true;
 
-    /**
-     * The one being asked may be mid-answer too — a question put over the top
-     * of them replaces it. Their answer has to actually be gone before the next
-     * can be asked for, so this waits for it rather than racing it.
-     *
-     * Mid-answer is not only a response still generating. A lectern that
-     * finished generating and is still saying the words is mid-answer as far as
-     * the room is concerned, and on the xAI engine it is mid-answer for seconds
-     * — long enough that a typed question aimed at whoever had just answered
-     * landed there almost every time. `release` is what picks this back up.
-     */
-    const them = roster[target];
-    if (them?.busy || them?.state === 'speaking') {
-      queued[target] = {};
-      them.cancel();
-      return true;
-    }
-
-    ask(target);
+    /** Behind somebody, and the room is told so: a question that lands in
+     *  silence and sits there is the thing this reads as otherwise. */
+    emit('waiting', { id: target, behind: floor });
     return true;
   }
 
@@ -759,6 +787,7 @@ export function createDirector({
     lastCut = -CUT.cooldown;
     heard = '';
     heardFrom = null;
+    question = null;
     stalledSince = 0;
     for (const id of order) {
       heardIt[id] = false;
@@ -802,6 +831,9 @@ export function createDirector({
     asked = null;
     waitingOn = null;
     floor = null;
+    /** Whoever it was aimed at is `next`, so resuming still goes to them —
+     *  and they have had the line itself since it was typed. */
+    question = null;
     stalledSince = 0;
     elapsed = now() - startedAt;
     setPhase('paused', why);
@@ -825,6 +857,7 @@ export function createDirector({
     disarm('ask', 'idle', 'hand', 'heard');
     asked = null;
     waitingOn = null;
+    question = null;
     stalledSince = 0;
     cancelAnimationFrame(frame);
     frame = 0;

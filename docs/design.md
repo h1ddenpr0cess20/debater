@@ -91,6 +91,14 @@ That one rule is what the rest hangs off:
   Without it the state stuck at "speaking" for good, and the moderator was the
   one who found out: a typed question goes to whoever is up next, which is
   whoever just answered, which is the lectern that is still saying it.
+
+- **A typed question waits for it.** Typing is silent, so there is nothing for
+  the room to have heard and nothing to talk over: the line reaches both
+  lecterns as it is sent, whoever is mid-answer is heard out, and the question
+  is put when that turn ends — where it decides the floor instead of the order.
+  A microphone is the opposite and always was. A person talking is an
+  interruption, their sessions treat it as one, and the answer is cut off where
+  it stands.
 - **A cut-in can be aimed.** The director opens the gate the wrong way,
   asks the listener for one sharp line with a per-response `instructions`, and
   lets the speaker's own turn detection — which *is* allowed to interrupt — cut

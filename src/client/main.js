@@ -224,6 +224,18 @@ function wire() {
       : `${name} has nothing to answer — asking again`);
   });
 
+  /**
+   * A typed question, waiting for whoever is talking to finish. Said out loud
+   * because the room looks identical to one that swallowed it.
+   */
+  director.on('waiting', ({ id, behind }) => {
+    const name = speakers[id]?.name ?? id;
+    const who = behind && behind !== MODERATOR ? speakers[behind]?.name ?? behind : null;
+    hud.notice(who
+      ? `${who} is finishing — ${name} takes that next`
+      : `${name} takes that as soon as the floor is free`);
+  });
+
   /** Said out loud, because a debate that stops dead used to stop in silence. */
   director.on('stalled', ({ id }) => {
     hud.notice(`nobody was saying anything — over to ${speakers[id]?.name ?? id}`);
