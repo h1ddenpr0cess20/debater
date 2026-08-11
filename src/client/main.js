@@ -7,6 +7,7 @@ import { createDirector } from './debate/director.js';
 import { createModerator, MODERATOR } from './debate/moderator.js';
 import { createTranscripts } from './debate/transcript.js';
 import { createAgentSession } from './session/agent.js';
+import { createXaiSession } from './session/xai.js';
 import { buildHall } from './stage/index.js';
 import { createToolSwitches } from './tools.js';
 import { createConnectorsPanel } from './ui/connectors.js';
@@ -30,7 +31,23 @@ const switches = createToolSwitches();
 
 trackKeyboardInset();
 
-const toolsPanel = createToolsPanel({ switches });
+/**
+ * A tool switched off should be off now, not next time, wherever that is
+ * possible. It is on the xAI engine — the proxy re-declares the tools on the
+ * call that is up — and it is not on OpenAI, where the tool list is settled when
+ * the client secret is minted. `syncTools` answers for that, per lectern, so
+ * this does not have to know which engine is running.
+ */
+const toolsPanel = createToolsPanel({
+  switches,
+  onChange() {
+    const live = agents.filter((agent) => agent.syncTools());
+    hud.notice(live.length
+      ? 'switched — both of them are told mid-debate'
+      : 'saved — the next debate is dialled with it');
+  },
+});
+
 const connectorsPanel = createConnectorsPanel({
   /** Which connectors are on is settled when a session is minted, so a debate
    *  already under way was minted with the old set. It is told at the next one. */
@@ -39,6 +56,7 @@ const connectorsPanel = createConnectorsPanel({
 
 let director = null;
 let moderator = null;
+let bus = null;
 let agents = [];
 let model = '';
 /** Filled in from the catalog, in place — the panels hold onto this object. */
@@ -95,9 +113,30 @@ const controls = createControls({
   onStop: (why) => director?.stop(why),
   onHeckle: (on) => { if (director) director.heckling = on; },
 
-  onModelChange(next) {
-    model = next;
-    for (const agent of agents) agent.model = next;
+  /**
+   * A model, and with it a provider.
+   *
+   * There is no separate engine switch: picking a Grok model is what puts the
+   * debate on xAI. Most of the time that is just a new model on the two calls
+   * we already have. When it crosses providers it is a different pair of calls
+   * dialled a different way, so both lecterns and the director in front of them
+   * are built again — which is only safe because the picker is disabled while a
+   * debate is up.
+   */
+  onModelChange(chosen) {
+    if (!chosen) return;
+    model = chosen.model;
+
+    if (!chosen.changed) {
+      for (const agent of agents) agent.model = model;
+      return;
+    }
+
+    director?.stop();
+    switches.setCatalog(chosen.switches);
+    toolsPanel.render();
+    build(chosen);
+    hud.notice(`${chosen.engine === 'xai' ? 'xAI' : 'OpenAI'} — the next debate runs on it`);
   },
 
   onVoiceChange(id, voice) {
@@ -185,42 +224,87 @@ function wire() {
       : `${name} has nothing to answer — asking again`);
   });
 
+  /**
+   * A typed question, waiting for whoever is talking to finish. Said out loud
+   * because the room looks identical to one that swallowed it.
+   */
+  director.on('waiting', ({ id, behind }) => {
+    const name = speakers[id]?.name ?? id;
+    const who = behind && behind !== MODERATOR ? speakers[behind]?.name ?? behind : null;
+    hud.notice(who
+      ? `${who} is finishing — ${name} takes that next`
+      : `${name} takes that as soon as the floor is free`);
+  });
+
+  /** Said out loud, because a debate that stops dead used to stop in silence. */
+  director.on('stalled', ({ id }) => {
+    hud.notice(`nobody was saying anything — over to ${speakers[id]?.name ?? id}`);
+  });
+
+  /** One of them has gone to look something up, which is worth watching happen. */
+  director.on('tool', ({ id, label }) => {
+    if (label) hud.notice(`${speakers[id]?.name ?? id} is ${label}`);
+  });
+
   director.on('error', ({ id, message }) => {
     hud.notice(id ? `${speakers[id]?.name ?? id}: ${message}` : message, { error: true });
     controls.sync();
   });
 }
 
+/** The roster and the caps, kept for every rebuild after the first. */
+let roster = [];
+let caps = null;
+
+/**
+ * The two lecterns and the director in front of them, for one engine.
+ *
+ * Which session class is used is the whole of the difference. Everything above
+ * this line — the bus, the microphone, the rigs, the log — is the same app
+ * either way, which is what makes the other engine an engine rather than a
+ * second version of the page.
+ */
+function build({ engine: which, model: chosenModel, voices }) {
+  const session = which === 'xai' ? createXaiSession : createAgentSession;
+  agents = roster.map((one) => session({
+    id: one.id,
+    name: one.name,
+    bus,
+    model: chosenModel,
+    voice: voices[one.id],
+    switches,
+  }));
+
+  director = createDirector({ bus, agents, moderator, caps });
+  wire();
+}
+
 try {
   const catalog = await fetchCatalog();
-  if (!catalog.models.length) throw new Error('this key can’t reach any realtime model');
 
-  for (const one of catalog.debaters) {
+  roster = catalog.debaters;
+  caps = catalog.caps;
+
+  for (const one of roster) {
     speakers[one.id] = one;
     const el = document.querySelector(`.lectern[data-debater="${one.id}"]`);
     if (!el) continue;
     el.style.setProperty('--accent', one.accent);
     el.querySelector('.name').textContent = one.name;
-    el.querySelector('.party').textContent = one.leaning;
+    el.querySelector('.party .long').textContent = one.leaning;
+    /** The same word for a lectern too narrow to hold it — see `styles.css`. */
+    el.querySelector('.party .short').textContent = one.leaning_short ?? one.leaning;
   }
 
-  switches.setCatalog(catalog.switches);
   const chosen = controls.setCatalog(catalog);
+  if (!chosen.model) throw new Error('this key can’t reach any realtime model');
   model = chosen.model;
+  switches.setCatalog(chosen.switches);
 
-  const bus = createAudioBus();
+  bus = createAudioBus();
   moderator = createModerator({ bus });
-  agents = catalog.debaters.map((one) => createAgentSession({
-    id: one.id,
-    name: one.name,
-    bus,
-    model: chosen.model,
-    voice: chosen.voices[one.id],
-  }));
-
-  director = createDirector({ bus, agents, moderator, caps: catalog.caps });
-  wire();
-  hud.setMeter({ turns: 0, limit: catalog.caps.turns, seconds: 0, usage: {} });
+  build(chosen);
+  hud.setMeter({ turns: 0, limit: caps.turns, seconds: 0, usage: {} });
 } catch (err) {
   controls.catalogUnavailable();
   hud.notice(`${err.message} — is the proxy running? (npm run dev)`, { error: true });

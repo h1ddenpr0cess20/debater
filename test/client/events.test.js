@@ -3,13 +3,20 @@ import { beforeEach, describe, it } from 'node:test';
 
 import { createEventHandler } from '../../src/client/session/events.js';
 
-function harness() {
+/**
+ * `audio` turns the harness into the xAI engine's half of this: a page that
+ * plays its own samples. Left off, it is the OpenAI engine, where the audio
+ * arrives on a media track and none of these hooks are given.
+ */
+function harness({ audio = false } = {}) {
   const states = [];
   const emitted = [];
   const failures = [];
   const messages = [];
 
   const calls = [];
+  const played = [];
+  const player = { flushes: 0, playing: false };
 
   const handler = createEventHandler({
     setState: (s) => states.push(s),
@@ -18,6 +25,11 @@ function harness() {
     messages,
     getModel: () => 'gpt-realtime-2.1',
     onFunctionCall: (call) => calls.push(call),
+    ...(audio ? {
+      play: (samples) => played.push(samples),
+      flushAudio: () => { player.flushes += 1; },
+      playing: () => player.playing,
+    } : {}),
   });
 
   return {
@@ -27,6 +39,8 @@ function harness() {
     failures,
     messages,
     calls,
+    played,
+    player,
     of: (name) => emitted.filter(([e]) => e === name).map(([, p]) => p),
     feed: (...events) => events.forEach((e) => handler.handle(e)),
   };
@@ -154,7 +168,15 @@ describe('completion and failure', () => {
 
   it('reports the model and usage when done', () => {
     h.feed({ type: 'response.done', response: { usage: { total_tokens: 42 } } });
-    assert.deepEqual(h.of('done'), [{ model: 'gpt-realtime-2.1', usage: { total_tokens: 42 } }]);
+    assert.deepEqual(h.of('done'), [
+      { model: 'gpt-realtime-2.1', usage: { total_tokens: 42 }, cancelled: false },
+    ]);
+  });
+
+  /** The floor above counts turns off this, and a cancelled answer is not one. */
+  it('marks a cancelled response as one nobody heard out', () => {
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'cancelled' } });
+    assert.equal(h.of('done').at(-1).cancelled, true);
   });
 
   it('surfaces a failed response and still returns to listening', () => {
@@ -278,5 +300,221 @@ describe('function calls', () => {
     h.feed(CALL);
 
     assert.equal(h.calls.length, 2);
+  });
+});
+
+/**
+ * The audio hooks, which only the engine that carries PCM in the event stream
+ * hands over. Everything here is a no-op on the other one, which is the point:
+ * one handler, and the difference between the engines stays in the wiring.
+ */
+describe('an engine that plays its own audio', () => {
+  const PCM = 'AAABAAIA';
+
+  it('plays what arrives in the delta', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.output_audio.delta', delta: PCM });
+
+    assert.deepEqual([...h.played[0]], [0, 1, 2]);
+    assert.equal(h.states.at(-1), 'speaking');
+  });
+
+  it('shrugs at a delta that is not audio, rather than playing noise', () => {
+    const h = harness({ audio: true });
+    h.feed(
+      { type: 'response.audio.delta', delta: '!!!!' },
+      { type: 'response.audio.delta' },
+    );
+    assert.deepEqual(h.played, []);
+  });
+
+  it('is still only a cue on the engine that plays its own track', () => {
+    const h = harness();
+    assert.doesNotThrow(() => h.feed({ type: 'response.output_audio.delta', delta: PCM }));
+    assert.equal(h.states.at(-1), 'speaking');
+  });
+
+  /** Being talked over: the far end abandons the turn, and so does the page. */
+  it('drops what is queued the moment somebody talks at this lectern', () => {
+    const h = harness({ audio: true });
+    h.player.playing = true;
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+
+    assert.equal(h.player.flushes, 1);
+    assert.deepEqual(h.of('speech'), [{ started: true }]);
+  });
+
+  it('has nothing to drop when it was not saying anything', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    assert.equal(h.player.flushes, 0);
+  });
+
+  /**
+   * Generation ends seconds before the audio does, and the director times a
+   * handover by when the room goes quiet — so a lectern with samples left is
+   * still speaking, whatever the response says.
+   */
+  it('is still speaking after the response is done, while audio is left', () => {
+    const h = harness({ audio: true });
+    h.player.playing = true;
+    h.feed({ type: 'response.created' }, { type: 'response.done', response: {} });
+
+    assert.notEqual(h.states.at(-1), 'listening');
+    assert.deepEqual(h.of('done').length, 1);
+  });
+
+  it('goes back to listening once there is none left', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.created' }, { type: 'response.done', response: {} });
+    assert.equal(h.states.at(-1), 'listening');
+  });
+});
+
+/**
+ * The one thing this engine has to do for itself.
+ *
+ * On OpenAI `interrupt_response: true` cancels an answer that gets talked over,
+ * and nothing more arrives for it. xAI has no such flag: the response carries on
+ * generating and its frames keep coming, so a lectern that is cut off goes quiet
+ * for a beat and then finishes its sentence over whoever cut in — unless the
+ * page writes the response off and drops the rest of it, which is this.
+ */
+describe('an answer that was cut off', () => {
+  const PCM = 'AAABAAIA';
+
+  const speaking = () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.created', response: { id: 'resp_1' } });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.player.playing = true;
+    return h;
+  };
+
+  it('drops the audio that arrives after the interruption', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+
+    assert.equal(h.player.flushes, 1);
+    assert.equal(h.played.length, 1, 'only what played before the interruption');
+  });
+
+  it('stops the caption growing from a turn nobody is listening to', () => {
+    const h = speaking();
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'as I ' });
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'was saying' });
+
+    assert.deepEqual(h.of('text'), ['as I ']);
+  });
+
+  it('says the turn was cut off, so the floor above does not count it', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
+  /**
+   * The proxy names a response it has refused ahead of the cancel, because a
+   * cancel is a round trip and xAI has audio in the air behind one.
+   */
+  it('drops a response the proxy refused, before the cancel lands', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.created', response: { id: 'resp_9' } });
+    h.feed({ type: 'proxy.refused', response_id: 'resp_9' });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_9', delta: PCM });
+    h.feed({ type: 'response.done', response: { id: 'resp_9', status: 'cancelled' } });
+
+    assert.deepEqual(h.played, []);
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
+  /**
+   * The same thing, asked for from outside: the session was told to stop, which
+   * is what the moderator cutting in comes down to. The cancel is a round trip
+   * and the frames already sent arrive after it, so writing the response off is
+   * the only thing that stops them being played and captioned as though they
+   * were wanted.
+   */
+  it('drops what is still in the air when it is told to stop answering', () => {
+    const h = speaking();
+    h.handler.abandon();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'as I was' });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.player.flushes, 1);
+    assert.equal(h.played.length, 1, 'only what played before it was cut off');
+    assert.deepEqual(h.of('text'), [], 'the caption grew from a turn nobody is listening to');
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
+  it('leaves an answer that was never interrupted alone', () => {
+    const h = speaking();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.played.length, 2);
+    assert.equal(h.of('done').at(-1).cancelled, false);
+  });
+
+  it('forgets what it wrote off when the call is reset', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.handler.reset();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+
+    assert.equal(h.played.length, 2, 'a fresh call is not bound by the last one');
+  });
+});
+
+describe('the hosted tools', () => {
+  it('says which one is running, and that it has stopped', () => {
+    const h = harness();
+    h.feed(
+      { type: 'response.web_search_call.in_progress' },
+      { type: 'response.web_search_call.done' },
+    );
+    assert.deepEqual(h.of('tool'), ['searching the web', null]);
+  });
+
+  it('has a caption for each of them', () => {
+    const h = harness();
+    h.feed(
+      { type: 'response.x_search_call.searching' },
+      { type: 'response.mcp_call.in_progress' },
+    );
+    assert.deepEqual(h.of('tool'), ['reading X', 'using a tool']);
+  });
+
+  it('stays quiet about every other event in the stream', () => {
+    const h = harness();
+    h.feed(
+      { type: 'session.created' },
+      { type: 'rate_limits.updated' },
+      { type: 'response.output_audio_transcript.done' },
+    );
+    assert.deepEqual(h.of('tool'), []);
+  });
+});
+
+describe('the proxied engine', () => {
+  it('passes on what the proxy says it dialled', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'proxy.ready', model: 'grok-voice-latest', voice: 'orion' });
+    assert.deepEqual(h.of('ready'), [{ model: 'grok-voice-latest', voice: 'orion' }]);
+  });
+
+  it('reports a running transcription of what it is hearing', () => {
+    const h = harness({ audio: true });
+    h.feed({
+      type: 'conversation.item.input_audio_transcription.updated',
+      transcript: 'markets sort',
+    });
+    assert.deepEqual(h.of('user'), ['markets sort']);
+    assert.deepEqual(h.messages, [], 'a half-heard line is not a turn of the record');
   });
 });

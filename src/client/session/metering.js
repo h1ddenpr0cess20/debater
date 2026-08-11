@@ -5,12 +5,22 @@ export function amplitude(analyser, buffer) {
   return Math.min(1, Math.sqrt(sum / buffer.length) * 7);
 }
 
-export function createAnalyser(audio, stream) {
+/**
+ * An analyser hanging off a source node, holding on to it.
+ *
+ * The source is a node rather than a stream because the two engines arrive
+ * differently — OpenAI's audio comes in on a media track, xAI's is played out of
+ * the page's own graph — and a level meter has no business knowing which.
+ * Whoever builds the source keeps it alive by way of `node.source`; a
+ * `MediaStreamAudioSourceNode` that nothing references is collected, and takes
+ * the meter with it.
+ */
+export function createAnalyser(audio, source) {
   const node = audio.createAnalyser();
   node.fftSize = 1024;
   node.smoothingTimeConstant = 0.4;
-  node.source = audio.createMediaStreamSource(stream);
-  node.source.connect(node);
+  node.source = source;
+  source.connect(node);
   node.buffer = new Float32Array(node.fftSize);
   return node;
 }

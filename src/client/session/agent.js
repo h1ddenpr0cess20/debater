@@ -230,6 +230,16 @@ export function createAgentSession({
       if (events.responding) call?.send({ type: 'response.cancel' });
     },
 
+    /**
+     * Nothing to sync. This engine's tools are settled when the client secret is
+     * minted, so a switch thrown mid-debate is a switch for the next one — which
+     * is what the panel says when it is thrown. The xAI engine can do it live,
+     * and this is here so that the page does not have to know which is which.
+     */
+    syncTools() {
+      return false;
+    },
+
     get messages() { return messages; },
     get connected() { return call?.open ?? false; },
     get busy() { return events.responding; },

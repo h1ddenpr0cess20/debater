@@ -44,6 +44,16 @@ three-d-stage {
   width: 100%;
   height: 100dvh;
   touch-action: none;
+  /**
+   * The room is the one thing in `#top` you can put a hand on.
+   *
+   * It lives in that stack so the captions can sit above it without the canvas
+   * resizing, and the stack is `pointer-events: none` so a caption never eats a
+   * click meant for the room. But `pointer-events` inherits, and the canvas is
+   * a descendant of it — which quietly took the orbit controls away with it.
+   * Nothing about being dragged moves the layout, so it takes them back.
+   */
+  pointer-events: auto;
 }
 
 .chip {
@@ -202,6 +212,11 @@ three-d-stage {
 .lectern .who {
   display: flex;
   align-items: center;
+  /** Two of these sit side by side in a two-column grid, and the line is three
+   *  uppercase words with letter-spacing on them. Wrapping is the backstop for
+   *  a width the abbreviation below still cannot fit: the two names may stack,
+   *  but they never end up on top of each other. */
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0;
   color: var(--accent);
@@ -209,6 +224,8 @@ three-d-stage {
 .lectern[data-debater="egg"] .who { justify-content: flex-end; }
 .lectern .name { color: color-mix(in srgb, var(--accent) 55%, #ffffff); }
 .lectern .party { color: rgba(255, 255, 255, .3); }
+/** The whole word by default; `Dem`/`Rep` once the lectern is too narrow for it. */
+.lectern .party .short { display: none; }
 .lectern .state {
   color: rgba(255, 255, 255, .28);
   transition: color .3s;
@@ -414,12 +431,33 @@ three-d-stage {
  * colour only on the one thing that is a switch.
  */
 #options .chip { text-transform: none; }
+
+/**
+ * Two groups, not five loose controls: what to run this on, and how long to let
+ * it run. They are what wraps, so a narrow window puts the limits under the
+ * model rather than breaking the row wherever it happens to run out — and a
+ * group keeps its own contents together, so `8 min` never ends up orphaned on a
+ * line of its own.
+ *
+ * This used to be one flat row with `margin-left: auto` on the switch to push
+ * the limits right. In a wrapping flex container that is a trap: the auto margin
+ * takes all the free space on the first line, so whatever follows it has none
+ * left and wraps, however wide the window is.
+ */
 #options {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px 4px;
+  justify-content: space-between;
+  gap: 2px 16px;
   padding: 2px 4px 0;
+}
+.opt-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  min-width: 0;
 }
 
 #model, .cap, .voice select {
@@ -480,7 +518,6 @@ three-d-stage {
 #heckle {
   appearance: none;
   cursor: pointer;
-  margin-left: auto;
   padding: 7px 9px;
   border: 0;
   border-radius: 8px;
@@ -730,6 +767,17 @@ three-d-stage {
 
 /* ── small screens ───────────────────────────────────────────────────────── */
 
+/**
+ * Two lecterns share one row, and each label is a name, a party and a state set
+ * in spaced uppercase. Somewhere around here the party word stops fitting beside
+ * the other two and the two labels start running into each other, so it gives up
+ * the six letters it can spare: Democrat and Republican become Dem and Rep.
+ */
+@media (max-width: 600px) {
+  .lectern .party .long { display: none; }
+  .lectern .party .short { display: inline; }
+}
+
 @media (max-width: 720px) {
   :root { --gutter: 14px; }
 
@@ -744,7 +792,11 @@ three-d-stage {
   #motion-row { flex-wrap: wrap; }
   #topic { flex: 1 1 100%; order: -1; padding: 6px; }
   #shuffle { margin-right: auto; }
-  #options { justify-content: space-between; }
+  /** Not much room: the model takes the line, the two voices sit under it, and
+   *  the limits keep the line after that. */
+  #options { gap: 4px 10px; }
+  .opt-group { flex: 1 1 100%; }
+  #limits { justify-content: space-between; }
   #model { flex: 1 0 100%; max-width: none; }
 }
 

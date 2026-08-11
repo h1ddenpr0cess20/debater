@@ -4,8 +4,9 @@
  * Tater has no accounts and no auth, which is defensible for something you run
  * on your own machine — right up until a page you happen to have open in
  * another tab asks on your behalf. A browser attaches `Origin` to exactly the
- * requests that carry that risk: cross-site form posts, and `fetch` with a
- * content type simple enough to skip the preflight.
+ * requests that carry that risk: cross-site form posts, `fetch` with a content
+ * type simple enough to skip the preflight, and WebSocket handshakes, which the
+ * same-origin policy does not cover at all.
  *
  * So: a request that names an origin has to name ours. A request with no
  * origin is not a browser — curl, a test, a native client — and is left alone,
@@ -31,4 +32,10 @@ export function sameOrigin(req) {
     /** `null`, and anything else that isn't a URL, is not this one. */
     return false;
   }
+}
+
+/** Turn down a socket that asked to be upgraded from somewhere else. */
+export function refuseUpgrade(socket) {
+  socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+  socket.destroy();
 }

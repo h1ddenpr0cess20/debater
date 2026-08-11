@@ -62,12 +62,88 @@ describe('GET /api/models', () => {
     }, { DEBATE_TURNS: '6' });
   });
 
-  it('says so rather than crashing when there is no key', async () => {
+  it('says so rather than crashing when there is no key for either engine', async () => {
     await stubbed(async ({ request }) => {
       const { status, body } = await request('/api/models');
       assert.equal(status, 500);
       assert.match(body.error, /OPENAI_API_KEY/);
+      assert.match(body.error, /XAI_API_KEY/);
     }, { key: '' });
+  });
+
+  it('abbreviates each party, for a lectern too narrow for the whole word', async () => {
+    await stubbed(async ({ request }) => {
+      const { body } = await request('/api/models');
+      for (const one of body.debaters) {
+        assert.ok(one.leaning_short.length < one.leaning.length);
+        assert.ok(one.leaning.startsWith(one.leaning_short));
+      }
+    });
+  });
+
+  describe('the engines', () => {
+    it('lists both, with what each can be dialled with', async () => {
+      await stubbed(async ({ request }) => {
+        const { body } = await request('/api/models');
+        assert.deepEqual(body.engines.map((e) => e.id), ['openai', 'xai']);
+
+        const xai = body.engines.find((e) => e.id === 'xai');
+        assert.equal(xai.ready, true);
+        assert.ok(xai.models.some((m) => m.id === 'grok-voice-latest'));
+        assert.ok(xai.voices.includes('atlas'));
+        assert.notEqual(xai.voices_for.egg, xai.voices_for.potato);
+      }, { XAI_API_KEY: 'xai-test' });
+    });
+
+    it('marks an engine with no key as one that cannot take a call', async () => {
+      await stubbed(async ({ request }) => {
+        const { body } = await request('/api/models');
+        assert.equal(body.engines.find((e) => e.id === 'xai').ready, false);
+      });
+    });
+
+    /** The panel's whole list, per engine — the debate's switches, not a lectern's. */
+    it('hands over the xAI tool switches, and none for OpenAI', async () => {
+      await stubbed(async ({ request }) => {
+        const { body } = await request('/api/models');
+        const named = (id) => body.engines.find((e) => e.id === id).switches.map((s) => s.name);
+        assert.deepEqual(named('xai'), ['web_search', 'x_search', 'mcp:almanac']);
+        assert.deepEqual(named('openai'), []);
+      }, {
+        XAI_API_KEY: 'xai-test',
+        XAI_MCP_SERVERS: JSON.stringify([
+          { server_label: 'almanac', server_url: 'https://one.example/mcp' },
+        ]),
+      });
+    });
+
+    it('spreads the chosen engine’s pickers out for the page that only wants those', async () => {
+      await stubbed(async ({ request }) => {
+        const { body } = await request('/api/models');
+        assert.equal(body.engine, 'xai');
+        assert.deepEqual(body.models, body.engines.find((e) => e.id === 'xai').models);
+        assert.deepEqual(body.voices, body.engines.find((e) => e.id === 'xai').voices);
+        assert.deepEqual(body.switches.map((s) => s.name), ['web_search', 'x_search']);
+      }, { XAI_API_KEY: 'xai-test', ENGINE: 'xai' });
+    });
+
+    /** A server set to an engine it has no key for still has to be usable. */
+    it('opens on the other one when the engine it was told to use cannot dial', async () => {
+      await stubbed(async ({ request }) => {
+        const { status, body } = await request('/api/models');
+        assert.equal(status, 200);
+        assert.equal(body.engine, 'openai');
+      }, { ENGINE: 'xai' });
+    });
+
+    it('still answers when only xAI has a key', async () => {
+      await stubbed(async ({ request }) => {
+        const { status, body } = await request('/api/models');
+        assert.equal(status, 200);
+        assert.equal(body.engine, 'xai');
+        assert.ok(body.models.length);
+      }, { key: '', XAI_API_KEY: 'xai-test' });
+    });
   });
 });
 

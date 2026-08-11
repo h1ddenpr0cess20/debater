@@ -39,6 +39,22 @@ const TRANSCRIPT_WAIT = 1200;
 const ASK_TIMEOUT = 6000;
 
 /**
+ * How long a debate may be doing nothing at all before it is prodded.
+ *
+ * The failure this exists for looks the same however it is reached: the debate
+ * is running, neither lectern is talking or generating, and no timer is left
+ * armed to change that — so it stays that way until somebody hits stop. Every
+ * hand-over path here can end in `ask` declining (they are answering already,
+ * they owe us an answer that never arrived, the frame was refused upstream), and
+ * a decline is not a plan. This is the plan.
+ *
+ * It is deliberately not clever about *why*. Anything that can silence the room
+ * for this long with nothing pending is a bug, known or not, and the recovery is
+ * the same one: ask whoever is up next.
+ */
+const STALL_MS = 9000;
+
+/**
  * How long to wait for the listener to take in what was just said.
  *
  * Asking for an answer is not the same as the far end having heard the
@@ -78,6 +94,25 @@ export const CUT = {
 };
 
 /**
+ * What a line handed over in text says about who said it.
+ *
+ * Everything either lectern is given arrives in the one role a conversation has
+ * for somebody else, so the label is the whole of the difference between the
+ * person in the room and the model at the other lectern. The personas are told
+ * to read both of these and to read neither of them out.
+ */
+const FROM = {
+  [MODERATOR]: `[${MODERATOR}]`,
+  other: '[the other lectern]',
+};
+
+const mark = (from, text) => `${from === MODERATOR ? FROM[MODERATOR] : FROM.other} ${text}`;
+
+/** Said to both of them the moment the microphone takes the floor. */
+const MIC_MARK = `${FROM[MODERATOR]} I have the floor — the voice you are about`
+  + ' to hear is mine, not the other lectern\'s.';
+
+/**
  * One-off directions, sent as a line rather than as response instructions.
  *
  * Instructions on a response replace the session's instead of adding to them,
@@ -111,8 +146,14 @@ export function createDirector({
   const usage = Object.fromEntries(order.map((id) => [id, { input: 0, output: 0 }]));
   const quiet = {};
   const finished = Object.fromEntries(order.map((id) => [id, false]));
-  /** The last thing each of them said, for when the audio did not carry it. */
-  const last = Object.fromEntries(order.map((id) => [id, '']));
+  /**
+   * The last thing each of them said, for when the audio did not carry it —
+   * the moderator included, because a question from the floor is the thing most
+   * often left unheard and the least excusable to hand over as somebody else's.
+   */
+  const last = Object.fromEntries([...order, MODERATOR].map((id) => [id, '']));
+  /** And who that was, most recently. */
+  let spokeLast = null;
   /** Whether each of them has taken in what was said to them since. */
   const heardIt = Object.fromEntries(order.map((id) => [id, false]));
   /**
@@ -131,10 +172,39 @@ export function createDirector({
    * Cancelling is a message, not an instant: the response is only really gone
    * when its `done` comes back. Asking in between is the same refusal as asking
    * during it, which is what moderating over the top of someone used to do.
+   *
+   * And an answer outlives its own `done`, by however long it takes to say —
+   * which the engine that holds its own audio reports as a state of its own.
+   * Both of those end in a lectern saying it has stopped, and `release` is the
+   * one thing that empties this.
    */
   const queued = Object.fromEntries(order.map((id) => [id, null]));
   /** What the microphone said, as transcribed by whichever session got it first. */
   let heard = '';
+  /**
+   * And which session that was.
+   *
+   * Both lecterns transcribe the same microphone, so the second copy has to be
+   * dropped — but one session sends the same line more than once as it fills
+   * out, and that is not a second copy, it is a better one. Whoever got there
+   * first keeps the right to improve on it; the other one is ignored.
+   */
+  let heardFrom = null;
+
+  /**
+   * A typed question, waiting for the room to be quiet enough to put it.
+   *
+   * Typing is silent. There is nothing for anybody to have heard and nothing to
+   * talk over, so a line typed while one of them is mid-answer does not cut
+   * them off: it reaches both lecterns as it lands, and the answer to it is
+   * asked for once the answer under way has been given. Which is the same
+   * moment the floor would have changed hands anyway — the question only
+   * decides who it changes hands to.
+   *
+   * The microphone is the other thing entirely. A person talking *is* an
+   * interruption, their sessions treat it as one, and none of this applies.
+   */
+  let question = null;
 
   let phase = 'idle';
   let topic = '';
@@ -143,13 +213,39 @@ export function createDirector({
   let turns = 0;
   let startedAt = 0;
   let elapsed = 0;
-  let idleTimer = 0;
-  let askTimer = 0;
-  let handTimer = 0;
-  let heardTimer = 0;
   let waitingOn = null;
   let asked = null;
   let frame = 0;
+
+  /**
+   * Every timer this thing has, in one place.
+   *
+   * They are not bookkeeping — between them they are the whole of the director's
+   * memory that something is *going* to happen. `stalled` reads them to decide
+   * whether the room is waiting on something or merely quiet, so a handle left
+   * behind after its timer has been cleared or has fired reads as a plan that
+   * does not exist, and the recovery below never runs. Hence going through
+   * `arm`/`disarm` rather than four variables and the discipline to zero them.
+   */
+  const timers = { idle: 0, ask: 0, hand: 0, heard: 0 };
+
+  function disarm(...names) {
+    for (const name of names) {
+      clearTimeout(timers[name]);
+      timers[name] = 0;
+    }
+  }
+
+  function arm(name, ms, fn) {
+    disarm(name);
+    timers[name] = setTimeout(() => {
+      timers[name] = 0;
+      fn();
+    }, ms);
+  }
+
+  /** How long the room has been doing nothing, or 0 if it is doing something. */
+  let stalledSince = 0;
 
   /** The turn being spoken now, and when it started — what a cut-in is judged on. */
   let spokenAt = 0;
@@ -187,6 +283,25 @@ export function createDirector({
     micRoute();
   }
 
+  /**
+   * Says whose the next voice is.
+   *
+   * The moderator reaches a lectern down the same wire the opposite lectern
+   * does — same gate, same input buffer, the same `user` turn at the far end —
+   * and nothing in what arrives distinguishes a person in the room from the
+   * model they are arguing with. So the far end assumed what it was told to
+   * assume, and answered a question from the floor as though the other lectern
+   * had asked it.
+   *
+   * This is the only thing that can say otherwise, and it has to go over before
+   * the audio does. It does: the item is created when the microphone takes the
+   * floor, and their speech is not committed to the conversation until they
+   * stop talking.
+   */
+  function markModerator() {
+    for (const agent of agents) agent.send(MIC_MARK, { answer: false });
+  }
+
   function micRoute() {
     /** No microphone, or one whose channel is not on the bus yet: nothing to route. */
     if (!moderator?.open || !bus.get(MODERATOR)) return;
@@ -197,14 +312,23 @@ export function createDirector({
     if (floor === id) return;
     floor = id;
     route(id);
-    clearTimeout(askTimer);
-    askTimer = 0;
+    disarm('ask');
     asked = null;
-    if (id !== MODERATOR) {
+    if (id === MODERATOR) markModerator();
+    else {
       spokenAt = now();
       running = '';
     }
     emit('floor', id);
+  }
+
+  /**
+   * Who last said something this lectern is owed an answer to. The moderator if
+   * they were the last to speak, and the opposite lectern otherwise — never
+   * this lectern itself, which is being handed the room, not its own words.
+   */
+  function spoke(to) {
+    return spokeLast && spokeLast !== to ? spokeLast : other(to);
   }
 
   /**
@@ -215,37 +339,112 @@ export function createDirector({
   function ask(id, { direction, retry = true } = {}) {
     const them = roster[id];
     if (!them?.connected || phase !== 'running') return false;
-    /** Already answering, or already asked and about to: one at a time. */
-    if (pending[id] || them.busy || them.state === 'speaking') return false;
+    /** Already asked, and the answer is on its way: one at a time. */
+    if (pending[id]) return false;
+
+    /**
+     * They are mid-answer, so this ask has to wait for it — and waiting is the
+     * whole of the fix. On xAI a lectern answers whatever it hears on its own,
+     * so the one being handed the floor is very often still generating an
+     * unsolicited answer the proxy is in the middle of cancelling. Dropping the
+     * ask there left nothing armed and nobody speaking, and the room sat silent
+     * until the stall watch noticed nine seconds later. `done` picks this up.
+     */
+    if (them.busy || them.state === 'speaking') {
+      queued[id] = { direction };
+      return false;
+    }
     queued[id] = null;
 
-    clearTimeout(heardTimer);
-    heardTimer = 0;
+    disarm('heard');
     waitingOn = null;
     next = id;
     asked = id;
     pending[id] = true;
     heardIt[id] = false;
+    /** Something is happening again, whatever the last few seconds looked like. */
+    stalledSince = 0;
     emit('asked', { id, direction: direction ?? null });
     if (direction) them.send(`[direction] ${direction}`, { answer: false });
     them.say();
 
-    clearTimeout(askTimer);
-    askTimer = 0;
+    disarm('ask');
     if (!retry) return true;
 
-    askTimer = setTimeout(() => {
+    arm('ask', ASK_TIMEOUT, () => {
       if (phase !== 'running' || asked !== id) return;
       const again = roster[id];
       if (!again?.connected || again.busy || again.state === 'speaking') return;
-      /** Nothing came back. Hand over the words instead of the sound. */
-      const words = heard || last[other(id)];
+      /**
+       * Nothing came back. Hand over the words instead of the sound — whoever
+       * said them, marked as theirs. Unmarked and taken from the other lectern
+       * regardless, this answered the moderator's question by handing over the
+       * last thing the opposite lectern had said and calling it the room.
+       */
+      const from = spoke(id);
+      const words = last[from];
       emit('nudge', { id, spoken: Boolean(words) });
       pending[id] = false;
-      if (words) again.send(words);
+      if (words) again.send(mark(from, words));
       else again.say();
       pending[id] = true;
-    }, ASK_TIMEOUT);
+    });
+    return true;
+  }
+
+  /**
+   * Takes an ask back off the shelf.
+   *
+   * `ask` shelves rather than declines when the lectern is mid-answer, and this
+   * is the only thing that ever takes one down again — so it has to run on
+   * every way an answer can end, not just on the tidy one. `done` is the tidy
+   * one. The other is a lectern that finished generating a while ago and has
+   * been playing the answer out ever since: on the xAI engine that is a state
+   * of its own, it can last seconds, and a moderator typing a question into it
+   * was the surest way to find that out.
+   */
+  function release(id) {
+    const waiting = queued[id];
+    if (!waiting || phase !== 'running') return;
+    queued[id] = null;
+    /**
+     * And back on the shelf if it still cannot go. `ask` declines for reasons
+     * that pass — they are still talking, they still owe us the answer this is
+     * waiting on — and every one of them turns up here, because this runs on a
+     * lectern reporting in rather than on the answer being over. Taking one
+     * down and dropping it is the failure this exists to stop, one step further
+     * along.
+     */
+    if (!ask(id, waiting)) queued[id] ??= waiting;
+  }
+
+  /**
+   * Whether anybody is mid-answer: owed one, generating one, or still saying
+   * one. All three are somebody's turn in progress, and a typed question waits
+   * for all three.
+   */
+  function midTurn() {
+    return order.some((id) => pending[id] || finished[id]
+      || roster[id]?.busy || roster[id]?.state === 'speaking');
+  }
+
+  /**
+   * Puts the moderator's waiting question to whoever it was aimed at.
+   *
+   * Called from every place a turn can end, because the end of a turn is what
+   * it has been waiting for. Answers whether it is off this file's hands —
+   * asked for, or shelved against an answer that is nearly over. It is kept
+   * rather than dropped otherwise: a question the room never gets round to is
+   * the failure this is a fix for.
+   */
+  function putQuestion() {
+    if (!question || phase !== 'running') return false;
+    const { to } = question;
+    disarm('hand');
+    floor = null;
+    route(to);
+    if (!ask(to) && !queued[to]) return false;
+    question = null;
     return true;
   }
 
@@ -258,20 +457,22 @@ export function createDirector({
    * a stall, so there is a fallback, and it says out loud that it fired.
    */
   function handOver(to, { direction } = {}) {
-    clearTimeout(heardTimer);
+    disarm('heard');
     if (heardIt[to]) return ask(to, { direction });
 
     waitingOn = to;
-    heardTimer = setTimeout(() => {
-      heardTimer = 0;
+    arm('heard', HEARD_WAIT, () => {
       if (phase !== 'running' || waitingOn !== to) return;
+      waitingOn = null;
       /** They never took it in. Say so — this is the failure that looks like
-       *  them ignoring each other — and hand the words over instead. */
+       *  them ignoring each other — and hand the words over instead, marked
+       *  with whoever actually said them. */
       emit('unheard', { id: to });
-      const words = last[other(to)];
-      if (words) roster[to]?.send(`[the other lectern] ${words}`, { answer: false });
+      const from = spoke(to);
+      const words = last[from];
+      if (words) roster[to]?.send(mark(from, words), { answer: false });
       ask(to, { direction });
-    }, HEARD_WAIT);
+    });
     return true;
   }
 
@@ -286,7 +487,10 @@ export function createDirector({
     report();
     if (turns >= limits.turns) return stop(`that is ${turns} turns — the limit`);
     /** The person in the room is mid-sentence; they get the floor, not us. */
-    if (floor === MODERATOR || handTimer) return;
+    if (floor === MODERATOR || timers.hand) return;
+    /** A question was typed while they were talking. This is the moment it was
+     *  waiting for, and it decides the floor instead of the order. */
+    if (putQuestion()) return;
     /** The second turn of a debate is the other one's opening statement, which
      *  is a reply as well — everything after that needs no telling. */
     handOver(other(id), turns === 1 ? { direction: DIRECTION.reply } : {});
@@ -295,6 +499,9 @@ export function createDirector({
   /** Whether the one listening should cut in over the one talking, right now. */
   function shouldCut(speaker) {
     if (!heckling || phase !== 'running' || floor !== speaker) return false;
+    /** The moderator is waiting on the end of this turn. Nobody else gets to
+     *  put another one in front of it. */
+    if (question) return false;
     if (turns < CUT.grace || turns - lastCut < CUT.cooldown) return false;
     if (now() - spokenAt < CUT.after) return false;
     /** One roll a second, so a long turn is not a hundred chances at it. */
@@ -329,19 +536,28 @@ export function createDirector({
    * inside one.
    */
   function handBack() {
-    if (handTimer) return;
+    if (timers.hand) return;
     floor = null;
     emit('floor', null);
-    handTimer = setTimeout(finishHandBack, TRANSCRIPT_WAIT);
+    arm('hand', TRANSCRIPT_WAIT, finishHandBack);
   }
 
   function finishHandBack() {
-    clearTimeout(handTimer);
-    handTimer = 0;
+    disarm('hand');
     if (phase !== 'running') return;
+    /** They have said something since typing it, out loud, to the room. That is
+     *  the question being answered — the one still queued is last week's. */
+    question = null;
     const to = named(heard) ?? next ?? order[0];
-    if (heard) emit('turn', { speaker: MODERATOR, content: heard });
+    if (heard) {
+      /** In their own right, so a hand-over in text says the moderator asked
+       *  it rather than dressing it up as the other lectern's last point. */
+      last[MODERATOR] = heard;
+      spokeLast = MODERATOR;
+      emit('turn', { speaker: MODERATOR, content: heard });
+    }
     heard = '';
+    heardFrom = null;
     route(to);
     handOver(to);
   }
@@ -353,7 +569,11 @@ export function createDirector({
         takeFloor(agent.id);
         finished[agent.id] = false;
         quiet[agent.id] = null;
+        return;
       }
+      /** They have stopped talking — which is not the same event as having
+       *  stopped generating, and is the one an ask can be waiting on. */
+      release(agent.id);
     });
 
     agent.on('pulse', (weight) => emit('pulse', { id: agent.id, weight }));
@@ -368,8 +588,7 @@ export function createDirector({
       heardIt[agent.id] = true;
       emit('took', { id: agent.id });
       if (waitingOn === agent.id) {
-        clearTimeout(heardTimer);
-        heardTimer = 0;
+        disarm('heard');
         waitingOn = null;
         ask(agent.id);
       }
@@ -382,6 +601,7 @@ export function createDirector({
 
     agent.on('said', (turn) => {
       last[agent.id] = turn.content;
+      spokeLast = agent.id;
       emit('turn', turn);
     });
 
@@ -392,14 +612,31 @@ export function createDirector({
      */
     agent.on('heard', (text) => {
       emit('heard', { id: agent.id, text });
-      if (!text || !(floor === MODERATOR || handTimer)) return;
-      if (!heard) heard = text;
-      if (handTimer) finishHandBack();
+      if (!text || !(floor === MODERATOR || timers.hand)) return;
+      if (!heard || heardFrom === agent.id) {
+        heard = text;
+        heardFrom = agent.id;
+      }
+      if (timers.hand) finishHandBack();
     });
 
-    agent.on('error', ({ message }) => emit('error', { id: agent.id, message }));
+    /** A hosted tool, mid-turn: they have gone to look something up. */
+    agent.on('tool', (label) => emit('tool', { id: agent.id, label }));
 
-    agent.on('done', ({ usage: used } = {}) => {
+    /**
+     * A frame the session refused — most often a second `response.create` while
+     * one was already running. Nothing is coming back for it, and `pending` left
+     * standing would decline every future ask for this lectern, which is a
+     * debate that stops without saying so. Whether a response really is in
+     * flight is the session's to answer, so take its word for it rather than
+     * guessing from here.
+     */
+    agent.on('error', ({ message }) => {
+      pending[agent.id] = agent.busy;
+      emit('error', { id: agent.id, message });
+    });
+
+    agent.on('done', ({ usage: used, cancelled = false } = {}) => {
       if (used) {
         usage[agent.id].input += used.input_tokens ?? 0;
         usage[agent.id].output += used.output_tokens ?? 0;
@@ -407,9 +644,15 @@ export function createDirector({
       /** They have answered; they may be asked again — and if something was
        * waiting on exactly that, it goes now. */
       pending[agent.id] = false;
-      const waiting = queued[agent.id];
-      queued[agent.id] = null;
-      if (waiting && phase === 'running') ask(agent.id, waiting);
+      release(agent.id);
+      /**
+       * A cancelled answer is not a turn. It was talked over, or it was one of
+       * the answers this engine gives unasked and the proxy refused — either
+       * way nobody heard it out, and letting it through here would spend a turn
+       * of the debate's budget on it and hand the floor over on top of whoever
+       * actually has it.
+       */
+      if (cancelled) return report();
       /** Generation is over; the audio is not. `tick` decides when it is. */
       finished[agent.id] = true;
       quiet[agent.id] = null;
@@ -427,8 +670,7 @@ export function createDirector({
     if (level > QUIET_LEVEL) {
       quiet[MODERATOR] = null;
       if (floor !== MODERATOR) {
-        clearTimeout(handTimer);
-        handTimer = 0;
+        disarm('hand');
         takeFloor(MODERATOR);
       }
       return;
@@ -439,6 +681,61 @@ export function createDirector({
     if (at - quiet[MODERATOR] < MODERATOR_QUIET_MS) return;
     quiet[MODERATOR] = null;
     handBack();
+  }
+
+  /**
+   * Whether the room is waiting on nothing.
+   *
+   * Not "is it quiet" — quiet is most of a handover. This is the stronger claim
+   * that there is nothing to be quiet *for*: no timer armed, neither lectern
+   * generating or playing out an answer, and no microphone mid-question. It is
+   * built out of what the sessions say about themselves rather than out of
+   * `pending`, because `pending` is a record of what was asked for and the whole
+   * problem is that it can outlive the answer it was waiting on.
+   */
+  function stalled() {
+    if (phase !== 'running') return false;
+    if (timers.ask || timers.hand || timers.heard) return false;
+    /** A question being asked in the room is not a stall, however quiet the two
+     *  of them are being about it. */
+    if (moderator?.open && moderator.live
+      && (floor === MODERATOR || bus.level(MODERATOR) > QUIET_LEVEL)) return false;
+
+    return order.every((id) => {
+      const them = roster[id];
+      return them?.connected
+        && !them.busy
+        && them.state !== 'speaking'
+        && !finished[id]
+        && bus.level(id) <= QUIET_LEVEL;
+    });
+  }
+
+  /**
+   * Nothing has happened for a while and nothing is going to. Whatever was
+   * dropped — an ask declined, a response that never started, a frame refused —
+   * the room is the room, and it is the director's to restart.
+   */
+  function watchStall(at) {
+    if (!stalled()) {
+      stalledSince = 0;
+      return;
+    }
+    stalledSince ||= at;
+    if (at - stalledSince < STALL_MS) return;
+    stalledSince = 0;
+
+    /** Proven, not assumed: `stalled` just established nothing is in flight. */
+    for (const id of order) {
+      pending[id] = false;
+      queued[id] = null;
+    }
+    /** A question waiting on a turn that never ended is what this is for as
+     *  much as anything: it goes out here rather than being forgotten. */
+    const to = question?.to ?? next ?? order[0];
+    emit('stalled', { id: to });
+    if (putQuestion()) return;
+    handOver(to);
   }
 
   /** The clock, the meters, and the level each rig moves to. */
@@ -470,46 +767,46 @@ export function createDirector({
     if (phase === 'running') {
       elapsed = at - startedAt;
       if (elapsed >= limits.seconds * 1000) return stop('time is up');
+      /** A lectern that has gone away is not a debate, and waiting on one is
+       *  the same silence as any other stall with no way out of it. */
+      if (!agents.every((agent) => agent.connected)) return stop('one of them dropped out');
       if (Math.floor(elapsed / 1000) !== Math.floor((elapsed - 16) / 1000)) report();
+      watchStall(at);
     }
   }
 
   /**
    * A line from the moderator, typed rather than spoken. Both of them are given
    * it, so both know it was said; one of them is asked to answer.
+   *
+   * Nobody is cut off for it, and nothing in flight is thrown away. Whoever is
+   * mid-answer finishes the answer — the room hears the end of the sentence it
+   * was in the middle of — and the question is put the moment they do.
    */
   function say(text, { to = null } = {}) {
     const line = String(text ?? '').trim();
     if (!line || phase !== 'running') return false;
 
-    for (const agent of agents) agent.send(`[${MODERATOR}] ${line}`, { answer: false });
+    for (const agent of agents) agent.send(mark(MODERATOR, line), { answer: false });
+    last[MODERATOR] = line;
+    spokeLast = MODERATOR;
     emit('turn', { speaker: MODERATOR, content: line });
 
     const target = to ?? named(line) ?? next ?? order[0];
-    /** Whoever was mid-answer is talked over, which is a moderator's privilege. */
-    for (const agent of agents) {
-      if (agent.id === target) continue;
-      agent.cancel();
-      pending[agent.id] = false;
-    }
-
-    clearTimeout(handTimer);
-    handTimer = 0;
-    floor = null;
-    route(target);
+    question = { to: target };
+    /** However this ends up being put, they are the one who answers next. */
+    next = target;
 
     /**
-     * The one being asked may be mid-answer too — a question put over the top
-     * of them replaces it. Their answer has to actually be gone before the next
-     * can be asked for, so this waits for its `done` rather than racing it.
+     * Straight out if the room is free — and the whole room, not just the one
+     * being asked. Asking them while the other is mid-answer is the same two
+     * voices at once by a different route.
      */
-    if (roster[target]?.busy) {
-      queued[target] = {};
-      roster[target].cancel();
-      return true;
-    }
+    if (!midTurn() && putQuestion()) return true;
 
-    ask(target);
+    /** Behind somebody, and the room is told so: a question that lands in
+     *  silence and sits there is the thing this reads as otherwise. */
+    emit('waiting', { id: target, behind: floor });
     return true;
   }
 
@@ -519,7 +816,9 @@ export function createDirector({
    * nothing for anybody to have heard first.
    */
   function announce(line, to, { direction } = {}) {
-    for (const agent of agents) agent.send(`[${MODERATOR}] ${line}`, { answer: false });
+    for (const agent of agents) agent.send(mark(MODERATOR, line), { answer: false });
+    last[MODERATOR] = line;
+    spokeLast = MODERATOR;
     emit('turn', { speaker: MODERATOR, content: line });
     route(to);
     ask(to, { direction });
@@ -560,12 +859,16 @@ export function createDirector({
     turns = 0;
     lastCut = -CUT.cooldown;
     heard = '';
+    heardFrom = null;
+    question = null;
+    stalledSince = 0;
     for (const id of order) {
       heardIt[id] = false;
       pending[id] = false;
       queued[id] = null;
     }
-    for (const id of order) last[id] = '';
+    for (const id of Object.keys(last)) last[id] = '';
+    spokeLast = null;
     startedAt = now();
     elapsed = 0;
     next = first;
@@ -591,32 +894,32 @@ export function createDirector({
     if (phase !== 'running') return;
     bus.silence();
     for (const agent of agents) {
-      agent.cancel();
+      /** Emptied before they are cut off, not after: stopping one of them is
+       *  itself something an ask can be waiting on. */
       pending[agent.id] = false;
       queued[agent.id] = null;
+      agent.cancel();
       bus.live(agent.id, false);
     }
-    clearTimeout(askTimer);
-    clearTimeout(handTimer);
-    clearTimeout(heardTimer);
-    askTimer = handTimer = heardTimer = 0;
+    disarm('ask', 'hand', 'heard');
     asked = null;
     waitingOn = null;
     floor = null;
+    /** Whoever it was aimed at is `next`, so resuming still goes to them —
+     *  and they have had the line itself since it was typed. */
+    question = null;
+    stalledSince = 0;
     elapsed = now() - startedAt;
     setPhase('paused', why);
 
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(
-      () => stop('paused too long — hung up to stop the meter'),
-      limits.idleSeconds * 1000,
-    );
+    arm('idle', limits.idleSeconds * 1000,
+      () => stop('paused too long — hung up to stop the meter'));
   }
 
   function resume() {
     if (phase !== 'paused') return;
-    clearTimeout(idleTimer);
-    idleTimer = 0;
+    disarm('idle');
+    stalledSince = 0;
     for (const id of order) bus.live(id, true);
     startedAt = now() - elapsed;
     setPhase('running');
@@ -625,20 +928,18 @@ export function createDirector({
 
   /** The real one. Both calls are hung up and nothing is billing. */
   function stop(why = '') {
-    clearTimeout(askTimer);
-    clearTimeout(idleTimer);
-    clearTimeout(handTimer);
-    clearTimeout(heardTimer);
-    askTimer = idleTimer = handTimer = heardTimer = 0;
+    disarm('ask', 'idle', 'hand', 'heard');
     asked = null;
     waitingOn = null;
+    question = null;
+    stalledSince = 0;
     cancelAnimationFrame(frame);
     frame = 0;
     bus.silence();
     for (const agent of agents) {
-      agent.stop();
       pending[agent.id] = false;
       queued[agent.id] = null;
+      agent.stop();
     }
     for (const id of order) emit('level', { id, level: 0 });
     floor = null;

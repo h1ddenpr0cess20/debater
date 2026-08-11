@@ -1,14 +1,17 @@
 # Debater
 
-Two OpenAI Realtime voice agents at two lecterns, arguing with each other. Marc
-is an egg and takes the Republican side; Tater is a potato and takes the
-Democratic one. Neither is talking to you: each one's voice is wired into the
-other one's call as its microphone, so as far as OpenAI is concerned both are
-having an ordinary conversation with a person, and the person is the opposite
-lectern.
+Two realtime voice agents at two lecterns, arguing with each other. Marc is an
+egg and takes the Republican side; Tater is a potato and takes the Democratic
+one. Neither is talking to you: each one's voice is wired into the other one's
+call as its microphone, so as far as the provider is concerned both are having
+an ordinary conversation with a person, and the person is the opposite lectern.
 
 You are the moderator. There is a microphone and a text field, both of which
 reach both of them, and a stop button that hangs the whole thing up.
+
+![The hall, with Tater and Marc at their lecterns](docs/screenshots/desktop.png)
+
+<img src="docs/screenshots/mobile.png" alt="The same room on a phone" width="320">
 
 ## Run
 
@@ -16,12 +19,37 @@ reach both of them, and a stop button that hangs the whole thing up.
 git clone https://github.com/h1ddenpr0cess20/debater
 cd debater
 npm install
-cp .env.example .env      # add your OPENAI_API_KEY
+cp .env.example .env      # add your OPENAI_API_KEY, or your XAI_API_KEY
 npm run dev               # → http://localhost:5173
 ```
 
 Type a motion — or hit `pick one` — and press `debate`. Both calls come up, the
 moderator's opening goes to both of them, and one is asked to start.
+
+## Two engines
+
+The lecterns run on OpenAI Realtime or on xAI's Grok voice API. Set one key, or
+set both and pick a model from the bar at the bottom: the list holds every model
+this server can dial, grouped by whoever runs it, and picking one is what decides
+the provider. There is no separate engine switch, because that was never a
+question worth asking on its own — you want a model, and the voices and tools
+follow it. With one key set it reads as an ordinary model picker, which is what
+it is.
+
+The personas, the floor, the caps and the log are the same either way. What
+differs is how a call is made, and it is the reason the xAI side is worth having:
+
+| | OpenAI | xAI |
+|---|---|---|
+| the call | browser to OpenAI over WebRTC, the key never leaving this server | proxied through this server over a WebSocket, for the same reason |
+| audio | a media track the browser moves | PCM16 in the event stream, played and captured by the page |
+| tools | the connectors, of which there are none yet | web search, X search and MCP, run at xAI's end |
+
+That last row is the point. `tools` fills up on the xAI engine, and a debate
+where either side can be asked to produce a source is a better debate. Switching
+one off there takes it out of the debate that is running, mid-sentence, without
+a redial — the proxy re-declares the session's tools. On OpenAI the same switch
+is for the next debate.
 
 ## The floor
 
@@ -40,9 +68,17 @@ sentence at once, and it is what makes the rest of this possible:
   are saying reads as heated, and `cut-ins` switches it off.
 - **The moderator.** The microphone is open into both lecterns at once, so a
   question is heard by the room; when you stop talking, one of them is asked to
-  take it — whoever you named, or whoever is up next. Typing does the same
-  thing. Interrupting them works: you are talking over a session that is allowed
-  to be interrupted.
+  take it — whoever you named, or whoever is up next. Interrupting them works:
+  you are talking over a session that is allowed to be interrupted, and it stops
+  to listen. Typing does not interrupt, because there is nothing to interrupt
+  with — the line reaches both of them as you send it, whoever is mid-answer
+  finishes it, and the question is put the moment they do. The room says whose
+  it is and who it is behind.
+- **Getting unstuck.** Every one of those hand-overs can be declined — they are
+  answering already, or they owe an answer that never arrived — and a decline
+  used to be the end of the debate, in silence. So the director watches for a
+  room that is doing nothing and has nothing armed to change that, and after
+  nine seconds of it asks whoever is up next and says so in the notice line.
 
 ## Money
 
@@ -63,12 +99,16 @@ sessions have reported so far.
 
 ## What is where
 
-`tools` is the per-debate switch panel. It is empty: they argue from what they
-know. `connectors` is where a tool the server runs would be switched on, and it
-is empty too — the route, the settings file and the tool declaration are all
-wired and tested, and nothing is registered. Hosted web search is the one worth
-waiting for; a debate where either side can be asked for a source is a better
-debate. See [`src/server/connectors/catalog.js`](src/server/connectors/catalog.js).
+`tools` is the per-debate switch panel, and what is in it is whatever the engine
+running has. On xAI that is web search, X search and any MCP server the
+environment names; on OpenAI it is empty, because the connectors are. A switch
+there applies to both lecterns — neither side gets a tool the other does not —
+and it can only take away.
+
+`connectors` is where a tool this server runs would be switched on, and it is
+empty: the route, the settings file and the tool declaration are all wired and
+tested, and nothing is registered. See
+[`src/server/connectors/catalog.js`](src/server/connectors/catalog.js).
 
 `log` keeps every debate, turn by turn and speaker by speaker. `continue` on one
 redials both lecterns with those turns handed over as context, and what is said

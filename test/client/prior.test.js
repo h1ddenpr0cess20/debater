@@ -12,10 +12,21 @@ const turns = [
 describe('prior', () => {
   it('shows each lectern its own lines as its own', () => {
     assert.deepEqual(prior(turns, 'egg'), [
-      { role: 'user', content: 'the motion is bread' },
+      { role: 'user', content: '[moderator] the motion is bread' },
       { role: 'assistant', content: 'bread is a scam' },
       { role: 'user', content: 'bread is fine' },
     ]);
+  });
+
+  /**
+   * Two roles, three speakers. Unmarked, a question from the floor comes back
+   * as a line the opposite lectern said — so a debate picked up out of the log
+   * opens by answering the moderator as though they were the opponent.
+   */
+  it('says which of the other two said it', () => {
+    const seen = prior(turns, 'egg');
+    assert.match(seen[0].content, /^\[moderator\] /, 'the moderator reads as the opponent');
+    assert.doesNotMatch(seen[2].content, /^\[/, 'the opponent was labelled as somebody');
   });
 
   it('flips with the point of view', () => {

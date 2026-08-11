@@ -60,7 +60,38 @@ export function fakeAgent(id, name) {
 
     finish(usage = { input_tokens: 10, output_tokens: 20 }) {
       this.state = 'listening';
-      this.emit('done', { usage });
+      this.busy = false;
+      this.emit('done', { usage, cancelled: false });
+    },
+
+    /**
+     * Generation over, the sentence not.
+     *
+     * On the engine that plays its own samples that is a state of its own and
+     * it lasts seconds: `response.done` arrives while the page still holds the
+     * audio, so the lectern is not busy and not finished either. `stopSpeaking`
+     * is the other half of it, and the two together are `finish`.
+     */
+    finishGenerating(usage = { input_tokens: 10, output_tokens: 20 }) {
+      this.busy = false;
+      this.emit('done', { usage, cancelled: false });
+    },
+
+    /** The audio has run out. Whatever they were saying, they have said it. */
+    stopSpeaking() {
+      this.state = 'listening';
+      this.emit('state', 'listening');
+    },
+
+    /**
+     * An answer that ended without being heard out — talked over, or one of the
+     * ones this engine gives unasked, refused by the proxy. It costs tokens and
+     * it is not a turn.
+     */
+    refused(usage = { input_tokens: 4, output_tokens: 0 }) {
+      this.state = 'listening';
+      this.busy = false;
+      this.emit('done', { usage, cancelled: true });
     },
   };
 }

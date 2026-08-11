@@ -1,6 +1,7 @@
 import { createOpenAIClient } from './openai.js';
 import { sameOrigin } from './origin.js';
 import { DEBATERS, DEBATER_IDS } from './personas.js';
+import { toolCatalog } from './xai/tools.js';
 
 const BODY_LIMIT = 64 * 1024;
 
@@ -46,9 +47,85 @@ function roster(config) {
     label: DEBATERS[id].label,
     side: DEBATERS[id].side,
     leaning: DEBATERS[id].leaning,
+    /** The same word, short enough to sit next to a name on a phone. */
+    leaning_short: DEBATERS[id].leaningShort,
     accent: DEBATERS[id].accent,
     voice: config.debaterVoices[id],
   }));
+}
+
+/**
+ * One engine, as the page's pickers need it: what it can be dialled with, and
+ * what may be switched off for a debate.
+ *
+ * `ready` is the whole of what the page needs to know about keys. A server with
+ * only one of the two set still answers this route — it says which engine can
+ * actually take a call, and the picker greys out the other rather than the page
+ * finding out at the point of dialling.
+ */
+function engineEntry({ id, label, ready, key, model, models, voices, debaterVoices, switches = [] }) {
+  return {
+    id,
+    label,
+    ready,
+    /** Which variable to set to make it ready, so the page can say so. */
+    key,
+    model,
+    models,
+    voices,
+    /** One voice per lectern, because each engine names its own. */
+    voices_for: { ...debaterVoices },
+    switches,
+  };
+}
+
+/**
+ * What the OpenAI engine can be dialled with. Listing the models is a call
+ * against the key, so a key that cannot make it does not take the whole catalog
+ * down with it — the engine comes back not ready, and the other one still works.
+ */
+async function openaiEngine(config, openai) {
+  let models = [];
+  if (config.apiKey) {
+    try {
+      models = await openai.listRealtimeModels();
+    } catch (err) {
+      console.warn(`openai: could not list the realtime models — ${err.message}`);
+    }
+  }
+
+  return engineEntry({
+    id: 'openai',
+    label: 'OpenAI Realtime',
+    ready: models.length > 0,
+    key: 'OPENAI_API_KEY',
+    model: config.defaultModel,
+    /**
+     * The default, even with no key. An engine that lists nothing is an engine
+     * the page cannot mention, and an engine the page cannot mention is one you
+     * have no way of discovering exists — which is the whole reason the other
+     * one went missing. It comes back as an entry that says what it wants.
+     */
+    models: models.length ? models : [{ id: config.defaultModel, display_name: config.defaultModel }],
+    voices: config.voices,
+    debaterVoices: config.debaterVoices,
+  });
+}
+
+/** The same for xAI, where the model list is a constant and no call is needed. */
+function xaiEngine(config) {
+  const { xai } = config;
+  return engineEntry({
+    id: 'xai',
+    label: 'xAI Grok Voice',
+    ready: Boolean(xai.apiKey),
+    key: 'XAI_API_KEY',
+    model: xai.defaultModel,
+    models: xai.models.map((id) => ({ id, display_name: id })),
+    voices: xai.voices,
+    debaterVoices: xai.debaterVoices,
+    switches: toolCatalog(xai.tools),
+  });
 }
 
 /**
@@ -80,20 +157,35 @@ export function createApiMiddleware(config, connectors = null) {
 
     try {
       if (path === '/api/models' && req.method === 'GET') {
-        if (!config.apiKey) return sendJSON(res, 500, { error: 'OPENAI_API_KEY is not set' });
+        const engines = [await openaiEngine(config, openai), xaiEngine(config)];
+        if (!engines.some((engine) => engine.ready)) {
+          return sendJSON(res, 500, {
+            error: 'OPENAI_API_KEY is not set, and neither is XAI_API_KEY —'
+              + ' one of the two has to be, or there is nothing to dial with',
+          });
+        }
+
+        /** Whichever the config asked for, unless that one cannot take a call. */
+        const asked = engines.find((engine) => engine.id === config.engine && engine.ready)
+          ?? engines.find((engine) => engine.ready);
+
         return sendJSON(res, 200, {
-          models: await openai.listRealtimeModels(),
-          model: config.defaultModel,
-          voices: config.voices,
+          engine: asked.id,
+          engines,
           debaters: roster(config),
           /** What the page opens its limits on. It may tighten them freely. */
           caps: config.caps,
           connectors: connectors?.names ?? [],
           /**
-           * The tools the page may switch off for one debate. Empty until a
-           * connector declares one — the panel is built and waiting for them.
+           * The chosen engine's own, spread out here as well: everything that
+           * reads this route wants the pickers for the engine it is opening on,
+           * and only the engine picker itself wants the other one's.
            */
-          switches: [],
+          model: asked.model,
+          models: asked.models,
+          voices: asked.voices,
+          /** The tools the page may switch off for one debate, on this engine. */
+          switches: asked.switches,
         });
       }
 

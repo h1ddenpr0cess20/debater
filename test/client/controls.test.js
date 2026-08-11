@@ -4,16 +4,42 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { MOTIONS, createControls } from '../../src/client/ui/controls.js';
 import { loadPage } from '../helpers/dom.js';
 
-const CATALOG = {
-  models: [{ id: 'gpt-realtime-2.1', display_name: 'gpt-realtime-2.1' }, { id: 'other-realtime' }],
+const OPENAI = {
+  id: 'openai',
+  label: 'OpenAI Realtime',
+  ready: true,
+  key: 'OPENAI_API_KEY',
   model: 'gpt-realtime-2.1',
+  models: [{ id: 'gpt-realtime-2.1', display_name: 'gpt-realtime-2.1' }, { id: 'other-realtime' }],
   voices: ['ash', 'cedar', 'verse'],
+  voices_for: { potato: 'cedar', egg: 'ash' },
+  switches: [],
+};
+
+const XAI = {
+  id: 'xai',
+  label: 'xAI Grok Voice',
+  ready: true,
+  key: 'XAI_API_KEY',
+  model: 'grok-voice-latest',
+  models: [{ id: 'grok-voice-latest' }],
+  voices: ['atlas', 'orion', 'rex'],
+  voices_for: { potato: 'atlas', egg: 'orion' },
+  switches: [{ name: 'web_search', label: 'web search' }],
+};
+
+const CATALOG = {
+  engine: 'openai',
+  engines: [OPENAI, XAI],
   debaters: [
-    { id: 'potato', name: 'Tater', accent: '#2f5d92', voice: 'cedar' },
-    { id: 'egg', name: 'Marc', accent: '#8e3232', voice: 'ash' },
+    { id: 'potato', name: 'Tater', accent: '#2f5d92' },
+    { id: 'egg', name: 'Marc', accent: '#8e3232' },
   ],
   caps: { turns: 9, seconds: 300 },
 };
+
+/** A server with one key set: the other engine's models are not offered at all. */
+const ONE_ENGINE = { ...CATALOG, engines: [OPENAI, { ...XAI, ready: false }] };
 
 describe('createControls', () => {
   let page;
@@ -185,5 +211,91 @@ describe('createControls', () => {
     assert.equal(page.$('#start').disabled, true);
     assert.equal(page.$('#mic').disabled, true);
     assert.equal(page.$('#model').textContent, 'unavailable');
+  });
+
+  describe('the model picker', () => {
+    /** There is no engine switch. The model is the switch. */
+    const groups = () => page.$$('#model optgroup').map((g) => g.label);
+    const models = () => page.$$('#model option').map((o) => o.value);
+    const change = (value) => {
+      page.$('#model').value = value;
+      page.$('#model').dispatchEvent(new page.window.Event('change'));
+      return calls.at(-1)[1];
+    };
+
+    it('lists every model this server can dial, under whoever runs it', () => {
+      controls.setCatalog(CATALOG);
+      assert.deepEqual(groups(), ['OpenAI Realtime', 'xAI Grok Voice']);
+      assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
+    });
+
+    it('lists every provider the server named, whatever it said about keys', () => {
+      controls.setCatalog(ONE_ENGINE);
+      assert.deepEqual(groups(), ['OpenAI Realtime', 'xAI Grok Voice']);
+      assert.deepEqual(models(), ['gpt-realtime-2.1', 'other-realtime', 'grok-voice-latest']);
+      assert.equal(page.$$('#model option').every((o) => !o.disabled), true);
+    });
+
+    it('opens on the model the server named', () => {
+      const chosen = controls.setCatalog({ ...CATALOG, engine: 'xai' });
+      assert.equal(chosen.engine, 'xai');
+      assert.equal(chosen.model, 'grok-voice-latest');
+      assert.equal(page.$('#model').value, 'grok-voice-latest');
+    });
+
+    it('says which engine a model belongs to, so nothing has to parse a name', () => {
+      controls.setCatalog(CATALOG);
+      const byEngine = page.$$('#model option').map((o) => o.dataset.engine);
+      assert.deepEqual(byEngine, ['openai', 'openai', 'xai']);
+    });
+
+    it('picking a Grok model is what puts the debate on xAI', () => {
+      controls.setCatalog(CATALOG);
+      const chosen = change('grok-voice-latest');
+
+      assert.equal(chosen.engine, 'xai');
+      assert.equal(chosen.model, 'grok-voice-latest');
+      assert.equal(chosen.changed, true, 'the page was not told to rebuild the calls');
+      assert.deepEqual(chosen.voices, { potato: 'atlas', egg: 'orion' });
+      assert.deepEqual(page.$$('#voice-egg option').map((o) => o.value), XAI.voices);
+      assert.deepEqual(chosen.switches, XAI.switches);
+    });
+
+    /** A model on the same engine is a new model, not a new pair of calls. */
+    it('does not rebuild anything for another model on the same engine', () => {
+      controls.setCatalog(CATALOG);
+      const chosen = change('other-realtime');
+
+      assert.equal(chosen.engine, 'openai');
+      assert.equal(chosen.changed, false);
+      assert.deepEqual(chosen.voices, { potato: 'cedar', egg: 'ash' });
+    });
+
+    it('keeps the voices you chose when the engine has not moved', () => {
+      controls.setCatalog(CATALOG);
+      page.$('#voice-egg').value = 'verse';
+
+      assert.deepEqual(change('other-realtime').voices, { potato: 'cedar', egg: 'verse' });
+    });
+
+    it('goes back again, with the voices that engine names', () => {
+      controls.setCatalog(CATALOG);
+      change('grok-voice-latest');
+      const back = change('gpt-realtime-2.1');
+
+      assert.equal(back.engine, 'openai');
+      assert.equal(back.changed, true);
+      assert.deepEqual(back.voices, { potato: 'cedar', egg: 'ash' });
+      assert.deepEqual(back.switches, []);
+    });
+
+    it('is not something you change mid-debate', () => {
+      controls.setCatalog(CATALOG);
+      assert.equal(page.$('#model').disabled, false);
+
+      status.phase = 'running';
+      controls.sync();
+      assert.equal(page.$('#model').disabled, true);
+    });
   });
 });
