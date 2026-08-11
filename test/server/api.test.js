@@ -54,6 +54,22 @@ describe('GET /api/models', () => {
     });
   });
 
+  /**
+   * A debate on the OpenAI engine runs browser-to-OpenAI, so a connector's tool
+   * call lands in the page and nowhere else. The page can only route one it
+   * knows the name of, and this route is where it learns them — without the
+   * names it declares no handler, and a model that calls one waits on its own
+   * tool call for ever.
+   */
+  it('names the connector tools the page has to be able to answer', async () => {
+    await stubbed(async ({ request }) => {
+      const { body } = await request('/api/models');
+      assert.ok(Array.isArray(body.connectors.names));
+      assert.ok(Array.isArray(body.connectors.tools));
+      assert.equal(typeof body.connectors.labels, 'object');
+    });
+  });
+
   it('hands over the caps, which the page cannot invent for itself', async () => {
     await stubbed(async ({ request }) => {
       const { body } = await request('/api/models');

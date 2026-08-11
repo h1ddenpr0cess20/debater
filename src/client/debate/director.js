@@ -749,6 +749,15 @@ export function createDirector({
       const level = bus.level(id);
       emit('level', { id, level });
 
+      /**
+       * Whether a turn just ended is only a question while the debate is
+       * running. Pausing shuts the gates and deadens both tracks, so a lectern
+       * that was mid-sentence goes quiet immediately — and read as the end of a
+       * turn that is what it looks like, which spent a turn of the budget on
+       * the pause and, on the last one of them, hung the debate up outright.
+       */
+      if (phase !== 'running') continue;
+
       if (!finished[id]) {
         if (floor === id && shouldCut(id)) cutIn(id);
         continue;
@@ -898,6 +907,10 @@ export function createDirector({
        *  itself something an ask can be waiting on. */
       pending[agent.id] = false;
       queued[agent.id] = null;
+      /** The answer they were playing out is cancelled rather than finished, so
+       *  it is not a turn waiting on the audio to run out either. */
+      finished[agent.id] = false;
+      quiet[agent.id] = null;
       agent.cancel();
       bus.live(agent.id, false);
     }

@@ -175,7 +175,20 @@ export function createApiMiddleware(config, connectors = null) {
           debaters: roster(config),
           /** What the page opens its limits on. It may tighten them freely. */
           caps: config.caps,
-          connectors: connectors?.names ?? [],
+          /**
+           * The connector surface the page has to be able to answer for.
+           *
+           * `names` is who is switched on; `tools` is what those declare, and
+           * the page needs it by name — a debate on the OpenAI engine runs
+           * browser-to-OpenAI, so a tool call lands in the page and nowhere
+           * else, and a page that does not know the name has nothing to route
+           * it to. The model then waits on its own tool call for ever.
+           */
+          connectors: {
+            names: connectors?.names ?? [],
+            tools: (connectors?.tools ?? []).map((tool) => tool.name),
+            labels: connectors?.labels ?? {},
+          },
           /**
            * The chosen engine's own, spread out here as well: everything that
            * reads this route wants the pickers for the engine it is opening on,
