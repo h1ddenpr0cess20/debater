@@ -59,6 +59,17 @@ export function sessionConfig({ voice, debater: self, topic, resumed, tools = []
       input: {
         format: { type: 'audio/pcm', rate: AUDIO_RATE },
         transport: 'json',
+        /**
+         * What this lectern heard, in words.
+         *
+         * xAI sends the transcription events only when a model is named here;
+         * OpenAI's session asks for the same thing in `personas.js`. Without it
+         * the page never learns what was said into the microphone, and three
+         * things quietly stop working: a moderator naming a debater is not
+         * heard to have named them, their question never reaches the log, and
+         * the nudge that hands a turn over in text hands over the wrong text.
+         */
+        transcription: { model: 'grok-transcribe' },
       },
       output: {
         format: { type: 'audio/pcm', rate: AUDIO_RATE },

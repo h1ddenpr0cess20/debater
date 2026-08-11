@@ -265,8 +265,21 @@ export function createDirector({
   function ask(id, { direction, retry = true } = {}) {
     const them = roster[id];
     if (!them?.connected || phase !== 'running') return false;
-    /** Already answering, or already asked and about to: one at a time. */
-    if (pending[id] || them.busy || them.state === 'speaking') return false;
+    /** Already asked, and the answer is on its way: one at a time. */
+    if (pending[id]) return false;
+
+    /**
+     * They are mid-answer, so this ask has to wait for it — and waiting is the
+     * whole of the fix. On xAI a lectern answers whatever it hears on its own,
+     * so the one being handed the floor is very often still generating an
+     * unsolicited answer the proxy is in the middle of cancelling. Dropping the
+     * ask there left nothing armed and nobody speaking, and the room sat silent
+     * until the stall watch noticed nine seconds later. `done` picks this up.
+     */
+    if (them.busy || them.state === 'speaking') {
+      queued[id] = { direction };
+      return false;
+    }
     queued[id] = null;
 
     disarm('heard');
@@ -465,7 +478,7 @@ export function createDirector({
       emit('error', { id: agent.id, message });
     });
 
-    agent.on('done', ({ usage: used } = {}) => {
+    agent.on('done', ({ usage: used, cancelled = false } = {}) => {
       if (used) {
         usage[agent.id].input += used.input_tokens ?? 0;
         usage[agent.id].output += used.output_tokens ?? 0;
@@ -476,6 +489,14 @@ export function createDirector({
       const waiting = queued[agent.id];
       queued[agent.id] = null;
       if (waiting && phase === 'running') ask(agent.id, waiting);
+      /**
+       * A cancelled answer is not a turn. It was talked over, or it was one of
+       * the answers this engine gives unasked and the proxy refused — either
+       * way nobody heard it out, and letting it through here would spend a turn
+       * of the debate's budget on it and hand the floor over on top of whoever
+       * actually has it.
+       */
+      if (cancelled) return report();
       /** Generation is over; the audio is not. `tick` decides when it is. */
       finished[agent.id] = true;
       quiet[agent.id] = null;

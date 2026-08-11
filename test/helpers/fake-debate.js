@@ -60,7 +60,19 @@ export function fakeAgent(id, name) {
 
     finish(usage = { input_tokens: 10, output_tokens: 20 }) {
       this.state = 'listening';
-      this.emit('done', { usage });
+      this.busy = false;
+      this.emit('done', { usage, cancelled: false });
+    },
+
+    /**
+     * An answer that ended without being heard out — talked over, or one of the
+     * ones this engine gives unasked, refused by the proxy. It costs tokens and
+     * it is not a turn.
+     */
+    refused(usage = { input_tokens: 4, output_tokens: 0 }) {
+      this.state = 'listening';
+      this.busy = false;
+      this.emit('done', { usage, cancelled: true });
     },
   };
 }

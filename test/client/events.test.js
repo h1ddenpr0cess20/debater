@@ -168,7 +168,15 @@ describe('completion and failure', () => {
 
   it('reports the model and usage when done', () => {
     h.feed({ type: 'response.done', response: { usage: { total_tokens: 42 } } });
-    assert.deepEqual(h.of('done'), [{ model: 'gpt-realtime-2.1', usage: { total_tokens: 42 } }]);
+    assert.deepEqual(h.of('done'), [
+      { model: 'gpt-realtime-2.1', usage: { total_tokens: 42 }, cancelled: false },
+    ]);
+  });
+
+  /** The floor above counts turns off this, and a cancelled answer is not one. */
+  it('marks a cancelled response as one nobody heard out', () => {
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'cancelled' } });
+    assert.equal(h.of('done').at(-1).cancelled, true);
   });
 
   it('surfaces a failed response and still returns to listening', () => {
@@ -360,6 +368,86 @@ describe('an engine that plays its own audio', () => {
     const h = harness({ audio: true });
     h.feed({ type: 'response.created' }, { type: 'response.done', response: {} });
     assert.equal(h.states.at(-1), 'listening');
+  });
+});
+
+/**
+ * The one thing this engine has to do for itself.
+ *
+ * On OpenAI `interrupt_response: true` cancels an answer that gets talked over,
+ * and nothing more arrives for it. xAI has no such flag: the response carries on
+ * generating and its frames keep coming, so a lectern that is cut off goes quiet
+ * for a beat and then finishes its sentence over whoever cut in — unless the
+ * page writes the response off and drops the rest of it, which is this.
+ */
+describe('an answer that was cut off', () => {
+  const PCM = 'AAABAAIA';
+
+  const speaking = () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.created', response: { id: 'resp_1' } });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.player.playing = true;
+    return h;
+  };
+
+  it('drops the audio that arrives after the interruption', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+
+    assert.equal(h.player.flushes, 1);
+    assert.equal(h.played.length, 1, 'only what played before the interruption');
+  });
+
+  it('stops the caption growing from a turn nobody is listening to', () => {
+    const h = speaking();
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'as I ' });
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'was saying' });
+
+    assert.deepEqual(h.of('text'), ['as I ']);
+  });
+
+  it('says the turn was cut off, so the floor above does not count it', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
+  /**
+   * The proxy names a response it has refused ahead of the cancel, because a
+   * cancel is a round trip and xAI has audio in the air behind one.
+   */
+  it('drops a response the proxy refused, before the cancel lands', () => {
+    const h = harness({ audio: true });
+    h.feed({ type: 'response.created', response: { id: 'resp_9' } });
+    h.feed({ type: 'proxy.refused', response_id: 'resp_9' });
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_9', delta: PCM });
+    h.feed({ type: 'response.done', response: { id: 'resp_9', status: 'cancelled' } });
+
+    assert.deepEqual(h.played, []);
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
+  it('leaves an answer that was never interrupted alone', () => {
+    const h = speaking();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.played.length, 2);
+    assert.equal(h.of('done').at(-1).cancelled, false);
+  });
+
+  it('forgets what it wrote off when the call is reset', () => {
+    const h = speaking();
+    h.feed({ type: 'input_audio_buffer.speech_started' });
+    h.handler.reset();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+
+    assert.equal(h.played.length, 2, 'a fresh call is not bound by the last one');
   });
 });
 

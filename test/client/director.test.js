@@ -417,6 +417,81 @@ describe('a debate that gets stuck', () => {
   });
 });
 
+/**
+ * What the xAI engine does that the OpenAI one does not: answer on its own.
+ *
+ * Its turn detection has no "never create a response" flag, so the lectern that
+ * is only listening answers too, every time. The proxy cancels those — but the
+ * page still sees a whole response begin and end, and the floor above has to
+ * know the difference between that and a turn somebody took.
+ */
+describe('answers nobody asked for', () => {
+  let h;
+
+  beforeEach(() => { h = harness(); });
+  afterEach(() => {
+    h.director.stop();
+    h.restore();
+  });
+
+  it('does not spend a turn of the debate on one', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    const before = h.director.turns;
+
+    /** Marc answers the room unasked; the proxy refuses it. Nobody spoke. */
+    h.potato.refused();
+    h.tick();
+    h.tick(2000);
+
+    assert.equal(h.director.turns, before, 'a cancelled answer was counted as a turn');
+  });
+
+  it('does not hand the floor over on the back of one', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    const asked = h.egg.asks.length + h.potato.asks.length;
+
+    h.potato.refused();
+    h.tick();
+    h.tick(2000);
+
+    assert.equal(h.egg.asks.length + h.potato.asks.length, asked,
+      'the floor was handed over on an answer nobody heard');
+  });
+
+  it('still counts what it cost, because it was billed either way', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.potato.refused({ input_tokens: 7, output_tokens: 3 });
+
+    assert.equal(h.director.usage.potato.input, 7);
+  });
+
+  /**
+   * The pause this closes. A lectern being handed the floor is very often still
+   * generating one of these, so the ask was declined with nothing left armed and
+   * the room sat silent until the stall watch noticed, nine seconds later.
+   */
+  it('asks the moment the unwanted answer is out of the way', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.emit('speech', { started: false });
+
+    /** Tater is mid-unsolicited-answer when the turn comes back to him. */
+    h.potato.busy = true;
+    h.potato.emit('speech', { started: false });
+    const before = h.potato.asks.length;
+
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+    assert.equal(h.potato.asks.length, before, 'asked while an answer was still running');
+
+    h.potato.refused();
+    assert.equal(h.potato.asks.length, before + 1, 'never asked once it was out of the way');
+  });
+});
+
 describe('cutting in', () => {
   let h;
 
