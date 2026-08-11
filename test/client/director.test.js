@@ -34,7 +34,7 @@ function harness({ caps = {}, mic = null, chance = () => 1 } = {}) {
   });
 
   for (const name of ['phase', 'floor', 'turn', 'interrupt', 'asked', 'nudge', 'meter',
-    'error', 'unheard', 'took', 'stalled', 'tool']) {
+    'error', 'unheard', 'took', 'stalled', 'tool', 'waiting']) {
     director.on(name, (payload) => events.push({ name, payload }));
   }
 
@@ -293,11 +293,12 @@ describe('a debate that gets stuck', () => {
   });
 
   /**
-   * The moderator talks over a lectern mid-answer. The next ask waits for that
-   * answer to die — and the answer dies without a `done` to say so, which is
-   * what a refused frame or a dropped response looks like from here.
+   * A question is typed at a lectern that is mid-answer, so it waits for that
+   * answer to be over — and the answer dies without a `done` to say so, which
+   * is what a refused frame or a dropped response looks like from here. The
+   * turn never ends, so the moment the question was waiting for never comes.
    */
-  async function stuckOnACancelledAnswer() {
+  async function stuckOnAnAnswerThatDied() {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.emit('speech', { started: false });
     h.egg.speak();
@@ -311,7 +312,7 @@ describe('a debate that gets stuck', () => {
   }
 
   it('notices, says so, and asks whoever was up next', async () => {
-    await stuckOnACancelledAnswer();
+    await stuckOnAnAnswerThatDied();
     const before = h.egg.asks.length;
 
     h.tick();
@@ -322,7 +323,7 @@ describe('a debate that gets stuck', () => {
   });
 
   it('gives it a while first — a quiet gap is not a stall', async () => {
-    await stuckOnACancelledAnswer();
+    await stuckOnAnAnswerThatDied();
     const before = h.egg.asks.length;
 
     h.tick();
@@ -333,7 +334,7 @@ describe('a debate that gets stuck', () => {
   });
 
   it('does not count a lectern that is still talking as nothing happening', async () => {
-    await stuckOnACancelledAnswer();
+    await stuckOnAnAnswerThatDied();
     h.egg.state = 'speaking';
 
     h.tick();
@@ -343,7 +344,7 @@ describe('a debate that gets stuck', () => {
   });
 
   it('does not count audio still playing out as nothing happening', async () => {
-    await stuckOnACancelledAnswer();
+    await stuckOnAnAnswerThatDied();
     h.bus.say('egg', 0.4);
 
     h.tick();
@@ -353,7 +354,7 @@ describe('a debate that gets stuck', () => {
   });
 
   it('starts counting again from scratch once something happens', async () => {
-    await stuckOnACancelledAnswer();
+    await stuckOnAnAnswerThatDied();
 
     h.tick();
     h.tick(6000);
@@ -589,6 +590,31 @@ describe('the moderator', () => {
     assert.equal(h.bus.isOpen('moderator', 'potato'), true);
   });
 
+  /**
+   * The moderator reaches both lecterns down the same wire the opposite lectern
+   * does, as the same kind of turn. Nothing in what arrives says which it is, so
+   * a question from the floor was answered as though the other lectern had
+   * asked it — this is the only thing that says otherwise, and it has to go
+   * over before the audio is committed at the far end.
+   */
+  it('tells both of them whose voice they are about to hear', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    mic.live = true;
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+
+    for (const agent of [h.egg, h.potato]) {
+      assert.match(agent.sent.at(-1).text, /^\[moderator\] I have the floor/);
+      assert.equal(agent.sent.at(-1).answer, false, 'the marker was answered rather than read');
+    }
+
+    const said = h.egg.sent.length;
+    h.tick();
+    h.tick();
+    assert.equal(h.egg.sent.length, said, 'said again for a turn they already had');
+  });
+
   it('takes the floor off both of them once you actually say something', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.speak();
@@ -610,8 +636,15 @@ describe('the moderator', () => {
       assert.match(agent.sent.at(-1).text, /\[moderator\] Tater, what about the deficit\?/);
       assert.equal(agent.sent.at(-1).answer, false);
     }
-    assert.equal(h.potato.asks.length, 1, 'the one who was named was not asked');
+    /** Marc is still owed his opening, so the question waits behind it. */
     assert.equal(h.egg.asks.length, asked, 'the one who was not named answered anyway');
+
+    h.egg.speak();
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+    assert.equal(h.potato.asks.length, 1, 'the one who was named was never asked');
   });
 
   it('logs what the moderator said as the moderator, not as a lectern', async () => {
@@ -620,35 +653,99 @@ describe('the moderator', () => {
     assert.deepEqual(h.seen('turn').at(-1), { speaker: 'moderator', content: 'order, please' });
   });
 
-  it('talks over whoever was mid-answer, which is a moderator’s privilege', async () => {
+  it('lets whoever was mid-answer finish it, rather than cutting them off', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.speak();
     h.director.say('Tater, your turn');
-    assert.equal(h.egg.cancels, 1);
+
+    assert.equal(h.egg.cancels, 0, 'the sentence they were in the middle of was cut');
+    assert.equal(h.potato.asks.length, 0, 'answered over the top of Marc');
+    assert.deepEqual(h.seen('waiting'), [{ id: 'potato', behind: 'egg' }]);
   });
 
-  it('waits for a cancelled answer to die before asking for the next one', async () => {
+  it('puts it the moment that answer is over', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.egg.speak();
-    h.egg.busy = true;
-    const asked = h.egg.asks.length;
+    h.director.say('Tater, your turn');
 
-    /** Put back to the one who is already talking: cancel, then wait. */
-    h.director.say('Marc, answer the question');
-    assert.equal(h.egg.cancels, 1);
-    assert.equal(h.egg.asks.length, asked, 'asked while an answer was still running');
-
-    h.egg.busy = false;
     h.egg.finish();
-    assert.equal(h.egg.asks.length, asked + 1, 'never asked once the answer was gone');
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.potato.asks.length, 1, 'the question was never put');
+    assert.equal(h.bus.isOpen('potato', 'egg'), true, 'answered into a shut gate');
   });
 
-  it('never asks a lectern that is already answering', async () => {
+  /** A hand-over that has not landed yet is not somebody mid-answer. */
+  it('goes straight out when nobody is saying anything', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+    const asked = h.potato.asks.length;
+
+    h.director.say('Tater, your turn');
+    assert.equal(h.potato.asks.length, asked + 1);
+    assert.deepEqual(h.seen('waiting'), [], 'made the room wait for nothing');
+  });
+
+  /**
+   * The question decides who answers next, so the turn it was waiting on must
+   * not also hand the floor over on its way out.
+   */
+  it('takes the floor off the order rather than following it', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    /** Put back to the one already talking, so the order and the question
+     *  disagree: he is not who the floor would have gone to. */
+    h.director.say('Marc, answer the question');
+
+    h.egg.finish();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.potato.asks.length, 0, 'the floor followed the order anyway');
+    assert.equal(h.egg.asks.length, 2, 'the one it was put to was never asked');
+  });
+
+  it('waits on an answer that is still being generated, too', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.potato.busy = true;
     const asked = h.potato.asks.length;
+
     h.director.say('Tater?');
-    assert.equal(h.potato.asks.length, asked);
+    assert.equal(h.potato.asks.length, asked, 'asked over the top of a running answer');
+
+    h.potato.finish();
+    h.bus.say('potato', 0);
+    h.tick();
+    h.tick(1000);
+    assert.equal(h.potato.asks.length, asked + 1, 'never asked once it was out of the way');
+  });
+
+  /**
+   * The turn it is waiting on can end in a way that never reaches the end-of-turn
+   * watch — refused upstream, or dropped. The room then has a question in it and
+   * nothing arranged to ask it, which is the whole failure by another route.
+   */
+  it('puts it anyway when the turn it was waiting on never ends', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.busy = true;
+    h.director.say('Tater, your turn');
+
+    /** Marc's answer is refused rather than finished: no turn ever ends. */
+    h.egg.refused();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(10_000);
+
+    assert.deepEqual(h.seen('stalled'), [{ id: 'potato' }]);
+    assert.equal(h.potato.asks.length, 1, 'the question was forgotten');
   });
 
   it('hands back to whoever was named once the microphone goes quiet', async () => {
@@ -671,6 +768,59 @@ describe('the moderator', () => {
     assert.equal(h.potato.asks.length, 1);
   });
 
+  /**
+   * The one the moderator names is very often the one who has just answered,
+   * and on the xAI engine that lectern is still saying it: generation ended
+   * seconds ago, the audio has not. It is not busy, so the old check let the
+   * question through to `ask` — which declines a lectern that is speaking, and
+   * shelved it. Nothing took it off the shelf, because the only thing that did
+   * was the `done` that had already been and gone. The question was never put.
+   */
+  it('is not ignored because the one it named is still saying something', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.finishGenerating();
+    const asked = h.egg.asks.length;
+
+    mic.live = true;
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+    h.bus.say('moderator', 0);
+    h.tick();
+    h.tick(2000);
+
+    h.egg.emit('speech', { started: false });
+    h.egg.emit('heard', 'Marc, answer the question');
+    assert.equal(h.egg.asks.length, asked, 'asked over the top of their own sentence');
+
+    h.egg.stopSpeaking();
+    assert.equal(h.egg.asks.length, asked + 1, 'the question was never put to them');
+  });
+
+  /**
+   * The other half of the same thing. When a lectern never takes the audio in,
+   * the question is handed over in text — and it used to be handed over as the
+   * last thing the opposite lectern said, unmarked, which is the moderator's
+   * question arriving as the opponent's point and answered as one.
+   */
+  it('hands a question they never took in over as the moderator’s', async () => {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    mic.live = true;
+    h.director.micChanged();
+    h.bus.say('moderator', 0.5);
+    h.tick();
+    h.bus.say('moderator', 0);
+    h.tick();
+    h.tick(2000);
+    h.egg.emit('heard', 'Tater, what about the deficit?');
+
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+
+    assert.deepEqual(h.seen('unheard'), [{ id: 'potato' }]);
+    assert.match(h.potato.sent.at(-1).text, /^\[moderator\] Tater, what about the deficit\?/);
+  });
+
   it('only logs the microphone once, however many sessions transcribed it', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     mic.live = true;
@@ -686,6 +836,89 @@ describe('the moderator', () => {
 
     const said = h.seen('turn').filter((t) => t.speaker === 'moderator');
     assert.equal(said.filter((t) => t.content === 'both of you, briefly').length, 1);
+  });
+});
+
+/**
+ * A typed line, put to a lectern that is mid-sentence with nothing generating.
+ *
+ * This is the ordinary case on the engine that plays its own audio, not an edge
+ * of it: a question typed while somebody is answering arrives with their
+ * response long done and seconds of it still to come out of the speakers. And
+ * an unaddressed line goes to whoever is up next, which is that same lectern.
+ */
+describe('a typed line, over the top of a sentence', () => {
+  let h;
+
+  beforeEach(() => { h = harness({ mic: { open: true, live: false } }); });
+  afterEach(() => {
+    h.director.stop();
+    h.restore();
+  });
+
+  /** Marc has finished generating and is still saying it. Tater has heard him. */
+  async function midSentence() {
+    await h.director.start({ topic: 'x', first: 'egg' });
+    h.egg.speak();
+    h.egg.finishGenerating();
+    h.potato.emit('speech', { started: false });
+  }
+
+  it('leaves them saying it, and the audio they have left with them', async () => {
+    await midSentence();
+    const asked = h.egg.asks.length;
+
+    h.director.say('Marc, answer the question');
+
+    assert.equal(h.egg.cancels, 0, 'the rest of the sentence was thrown away');
+    assert.equal(h.egg.asks.length, asked, 'asked over the top of their own sentence');
+    assert.deepEqual(h.seen('waiting'), [{ id: 'egg', behind: 'egg' }]);
+  });
+
+  /**
+   * Which is the audio running out, not the response finishing: on this engine
+   * those are seconds apart, and the second one is the one the room hears.
+   */
+  it('puts the question once the audio has actually run out', async () => {
+    await midSentence();
+    const asked = h.egg.asks.length;
+
+    h.director.say('Marc, answer the question');
+    h.egg.stopSpeaking();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.egg.asks.length, asked + 1, 'the question was never put');
+    assert.equal(h.potato.asks.length, 0, 'the other one took a question put to Marc');
+  });
+
+  it('counts the turn it waited for, because it was heard out', async () => {
+    await midSentence();
+    const turns = h.director.turns;
+
+    h.director.say('Marc, answer the question');
+    h.egg.stopSpeaking();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.director.turns, turns + 1);
+  });
+
+  /** A second line, typed before the first has been put, replaces it. */
+  it('answers the last thing that was typed, not the first', async () => {
+    await midSentence();
+    h.director.say('Tater, hold on');
+    h.director.say('Marc, you answer that');
+
+    h.egg.stopSpeaking();
+    h.bus.say('egg', 0);
+    h.tick();
+    h.tick(1000);
+
+    assert.equal(h.potato.asks.length, 0, 'answered a question that was taken off him');
+    assert.equal(h.egg.asks.length, 2, 'the line that replaced it was never put');
   });
 });
 

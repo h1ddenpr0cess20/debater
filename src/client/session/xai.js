@@ -109,7 +109,24 @@ export function createXaiSession({
       room.gain.value = audible ? 1 : 0;
       out.connect(room);
       room.connect(ctx.destination);
-      player = createPlayer(ctx, out);
+      player = createPlayer(ctx, out, {
+        /**
+         * The end of speaking, which on this engine nothing else marks.
+         *
+         * `response.done` arrives while there are still seconds of this answer
+         * queued, so it deliberately leaves the state at "speaking" — and the
+         * event stream then goes quiet for good. Left there, the only thing
+         * that ever moved this lectern off "speaking" again was somebody
+         * talking *into* it, and everything that declines to ask a lectern
+         * that is speaking declined for ever: a typed question to whoever had
+         * just answered was shelved and never taken down again.
+         *
+         * So speaking means there are samples, and nothing else. It is not
+         * conditioned on the response being over, because being cut off is the
+         * other way this ends and the room has to hear about that one too.
+         */
+        onIdle: () => setState('listening'),
+      });
       channel.attachNode(out);
 
       const earlier = prior(turns, id);
@@ -214,10 +231,16 @@ export function createXaiSession({
      * Stop answering. The queued audio goes with it: on this engine a cancelled
      * response has seconds of it already scheduled, and letting that play out is
      * the model finishing a sentence the room has moved on from.
+     *
+     * Written off rather than merely flushed, because the cancel is a round trip
+     * and what is already in the air arrives after it — audio for the queue that
+     * was just emptied, and a caption still growing. And because a lectern that
+     * has stopped generating can still be mid-sentence: the moderator talking
+     * over one of those is the ordinary case, not the exception.
      */
     cancel() {
       if (events.responding) call?.send({ type: 'response.cancel' });
-      player?.flush();
+      events.abandon();
     },
 
     /**

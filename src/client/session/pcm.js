@@ -26,10 +26,23 @@ const LEAD = 0.08;
  * as one continuous thing rather than as a queue with gaps in it. `cursor` is
  * that running end — and, usefully, also the answer to whether this lectern is
  * still making noise, which is what the director times a handover by.
+ *
+ * `onIdle` is the other half of that answer, and it is not optional. On this
+ * engine a response finishes generating seconds before its audio has played
+ * out, so "done" is not the end of speaking and the stream says nothing at all
+ * about when the end arrives. This does: the queue running dry is the moment
+ * this lectern stopped talking, and everything upstairs that waits for a
+ * lectern to stop waits on it.
  */
-export function createPlayer(ctx, destination) {
+export function createPlayer(ctx, destination, { onIdle = () => {} } = {}) {
   let cursor = 0;
   let sources = new Set();
+
+  /** Nothing left scheduled. Whatever was being said has now been said. */
+  function drained() {
+    cursor = 0;
+    onIdle();
+  }
 
   return {
     enqueue(samples) {
@@ -50,11 +63,15 @@ export function createPlayer(ctx, destination) {
       cursor = at + buffer.duration;
 
       sources.add(source);
-      source.onended = () => sources.delete(source);
+      source.onended = () => {
+        sources.delete(source);
+        if (!sources.size) drained();
+      };
     },
 
     /** Everything scheduled and not yet played, dropped. Being talked over. */
     flush() {
+      const had = sources.size > 0;
       for (const source of sources) {
         source.onended = null;
         try {
@@ -64,6 +81,8 @@ export function createPlayer(ctx, destination) {
       }
       sources = new Set();
       cursor = 0;
+      /** Cut off is still stopped, and reads the same from every floor above. */
+      if (had) drained();
     },
 
     get playing() {

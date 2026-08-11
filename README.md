@@ -68,9 +68,12 @@ sentence at once, and it is what makes the rest of this possible:
   are saying reads as heated, and `cut-ins` switches it off.
 - **The moderator.** The microphone is open into both lecterns at once, so a
   question is heard by the room; when you stop talking, one of them is asked to
-  take it — whoever you named, or whoever is up next. Typing does the same
-  thing. Interrupting them works: you are talking over a session that is allowed
-  to be interrupted.
+  take it — whoever you named, or whoever is up next. Interrupting them works:
+  you are talking over a session that is allowed to be interrupted, and it stops
+  to listen. Typing does not interrupt, because there is nothing to interrupt
+  with — the line reaches both of them as you send it, whoever is mid-answer
+  finishes it, and the question is put the moment they do. The room says whose
+  it is and who it is behind.
 - **Getting unstuck.** Every one of those hand-overs can be declined — they are
   answering already, or they owe an answer that never arrived — and a decline
   used to be the end of the debate, in silence. So the director watches for a

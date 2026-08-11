@@ -54,20 +54,25 @@ touches.
 
 ## Nobody answers on their own
 
-Both sessions are minted with `turn_detection.create_response: false`. Turn
-detection still runs — it commits the input buffer, and it still interrupts —
-but no response is ever created by it. Every answer in the room is one the
-director asked for.
+Every answer in the room is one the director asked for. Turn detection still
+runs — it commits the input buffer, and it still interrupts — but on its own it
+never puts a voice in the room.
 
-On the xAI engine the proxy does not take that flag on trust. It counts the
+The OpenAI session is minted with `turn_detection.create_response: false`, and
+that is the whole of it there. xAI's realtime API has no such flag: the port
+invented one, sent it, and got a debate that did nothing at all — so the session
+is now sent exactly what the single-agent app it came from sends, and the floor
+is held in [`proxy.js`](../src/server/xai/proxy.js) instead, against what
+actually comes back rather than against a payload's promise. It counts the
 `response.create` frames the page sends against the `response.created` events
-coming back, and cancels one nobody asked for. It is there because the failure
-would otherwise be silent and expensive: both models would answer every sentence
-the other said and answer the moderator in chorus, and the page — which cannot
-tell a response it asked for from one it did not — would carry on as though it
-were driving.
+coming back, and cancels one nobody asked for, naming it to the page ahead of
+the cancel so the audio already in the air is dropped rather than played. The
+failure it stands in for is silent and expensive: both models answering every
+sentence the other says, and answering the moderator in chorus, with the page —
+which cannot tell a response it asked for from one it did not — carrying on as
+though it were driving.
 
-That one setting is what the rest hangs off:
+That one rule is what the rest hangs off:
 
 - **Two models cannot answer at once.** Which matters most for the moderator,
   who is heard by both of them: without it, a question to the room gets answered
@@ -77,6 +82,23 @@ That one setting is what the rest hangs off:
   at `response.done` would chop the last sentence off before the other one ever
   heard it. So the director watches the analyser: quiet for 900ms is the end of
   a turn, and then the other one is asked.
+
+  Which makes "still saying it" a state of its own, and on the xAI engine a long
+  one: the page is holding that audio, so the lectern is not busy, not finished,
+  and not askable. Everything that asks for an answer waits it out — and what
+  ends the wait is [`session/pcm.js`](../src/client/session/pcm.js) saying its
+  queue has run dry, because nothing in the event stream marks that moment.
+  Without it the state stuck at "speaking" for good, and the moderator was the
+  one who found out: a typed question goes to whoever is up next, which is
+  whoever just answered, which is the lectern that is still saying it.
+
+- **A typed question waits for it.** Typing is silent, so there is nothing for
+  the room to have heard and nothing to talk over: the line reaches both
+  lecterns as it is sent, whoever is mid-answer is heard out, and the question
+  is put when that turn ends — where it decides the floor instead of the order.
+  A microphone is the opposite and always was. A person talking is an
+  interruption, their sessions treat it as one, and the answer is cut off where
+  it stands.
 - **A cut-in can be aimed.** The director opens the gate the wrong way,
   asks the listener for one sharp line with a per-response `instructions`, and
   lets the speaker's own turn detection — which *is* allowed to interrupt — cut
@@ -92,9 +114,11 @@ hands the other one's last words over as text.
 
 The second is a watchdog, because the retry only covers a turn that was asked
 for. Every hand-over ends in `ask`, and `ask` can decline — they are answering
-already, or they still owe an answer that was refused upstream and will never
-arrive to clear the flag saying so. A decline leaves nothing armed, and the room
-goes quiet for good. So `stalled()` asks the stronger question: not "is it
+already, they are still saying the last one, or they still owe an answer that
+was refused upstream and will never arrive to clear the flag saying so. The
+first two shelve the ask and `release` puts it back out when that lectern
+reports it has stopped; the rest leave nothing armed, and the room goes quiet
+for good. So `stalled()` asks the stronger question: not "is it
 quiet" — quiet is most of a hand-over — but "is there anything to be quiet for".
 No timer armed, neither lectern generating or playing audio out, no microphone
 mid-question. Nine seconds of that and the director clears what it thought it
@@ -105,6 +129,29 @@ debate that long with nothing pending is a bug, known or not, and the recovery
 is the same one either way. Its precondition is that the timers tell the truth,
 which is why they go through `arm`/`disarm` — a handle left behind after its
 timer fired reads as a plan that does not exist.
+
+## Three voices, two roles
+
+A conversation has `assistant` and `user`, and this room has three people in it.
+Each session's own turns are `assistant` and everything else is `user`, which is
+what makes the opposite lectern look like the person on the other end of an
+ordinary call — the whole trick of the app. It also means the moderator arrives
+in exactly the same shape as the opponent: same gate, same input buffer, same
+role at the far end. Nothing about what lands says which it was.
+
+So it is said out loud, every time, and the personas are told to read it:
+
+| | |
+|---|---|
+| a typed line | goes over marked `[moderator]` |
+| the microphone | a `[moderator]` line saying they have the floor goes over first, and the audio commits after it |
+| a line handed over in text | carries `[moderator]` or `[the other lectern]`, whichever actually said it |
+| a debate picked up out of the log | replays the moderator's turns marked, the lecterns' turns bare |
+
+Without the labels the far end does what it was told to do with anything it
+cannot place: treats it as the opponent. That is a question from the floor
+answered as though the other lectern had asked it, which is most of what a
+moderator says.
 
 ## Who is where
 
