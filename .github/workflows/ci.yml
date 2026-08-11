@@ -10,10 +10,12 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR makes the in-flight run pointless.
+# A new push to a PR makes the in-flight run pointless. A push to main does not:
+# cancelling there leaves the commit that got superseded with no verdict at all,
+# so main is only ever as verified as its last run that happened to survive.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
