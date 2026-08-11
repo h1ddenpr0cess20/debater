@@ -12,12 +12,28 @@ import { loadTls } from './tls.js';
  */
 function staleBuild() {
   const at = (path) => statSync(fileURLToPath(new URL(path, import.meta.url))).mtimeMs;
+
+  let built;
   try {
-    const built = at('../../dist/index.html');
-    return ['../client', '../../index.html'].some((path) => at(path) > built);
+    built = at('../../dist/index.html');
   } catch {
+    /** No build at all, which is the one thing this really has to say. */
     return true;
   }
+
+  /**
+   * A source that is not there is not a source that is newer. The container
+   * image ships `dist/` and `src/server` and nothing else — see the Dockerfile
+   * — so reading a missing `src/client` as "out of date" told every deployment
+   * to run a build it had already run, and told it every time it started.
+   */
+  return ['../client', '../../index.html'].some((path) => {
+    try {
+      return at(path) > built;
+    } catch {
+      return false;
+    }
+  });
 }
 
 const config = loadConfig();

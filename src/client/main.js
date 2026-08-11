@@ -255,6 +255,9 @@ function wire() {
 /** The roster and the caps, kept for every rebuild after the first. */
 let roster = [];
 let caps = null;
+/** And the connector tools the page has to be able to answer, same reason. */
+let connectorTools = [];
+let toolLabels = {};
 
 /**
  * The two lecterns and the director in front of them, for one engine.
@@ -273,6 +276,14 @@ function build({ engine: which, model: chosenModel, voices }) {
     model: chosenModel,
     voice: voices[one.id],
     switches,
+    /**
+     * The connector tools, which only the OpenAI engine can be handed: its
+     * calls run browser-to-OpenAI, so a tool call arrives in this page and the
+     * page is the only thing that can answer it. xAI runs its own inside its
+     * own turn and ignores both of these.
+     */
+    connectorTools,
+    toolLabels,
   }));
 
   director = createDirector({ bus, agents, moderator, caps });
@@ -284,6 +295,8 @@ try {
 
   roster = catalog.debaters;
   caps = catalog.caps;
+  connectorTools = catalog.connectors?.tools ?? [];
+  toolLabels = catalog.connectors?.labels ?? {};
 
   for (const one of roster) {
     speakers[one.id] = one;

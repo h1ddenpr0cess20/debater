@@ -250,6 +250,31 @@ describe('pausing', () => {
     assert.equal(h.egg.connected, true);
   });
 
+  /**
+   * The gates shut and both tracks go dead the moment it is paused, so whoever
+   * was mid-answer goes quiet at once. Read as the end of a turn that spent one
+   * of the debate's turns on the pause itself — and on the last one, hung the
+   * calls up while nobody was even in the room.
+   */
+  it('does not count the silence it just caused as a turn', async () => {
+    const paused = harness({ caps: { turns: 1 } });
+    await paused.director.start({ topic: 'x', first: 'egg' });
+    paused.egg.speak();
+    paused.bus.say('egg', 0.5);
+    paused.tick();
+    /** Generation over, the sentence not: the audio is what a turn ends on. */
+    paused.egg.finishGenerating();
+    paused.director.pause();
+
+    paused.bus.say('egg', 0);
+    for (let i = 0; i < 4; i += 1) paused.tick(500);
+
+    assert.equal(paused.director.turns, 0);
+    assert.equal(paused.director.phase, 'paused');
+    paused.director.stop();
+    paused.restore();
+  });
+
   it('comes back by telling them so and asking whoever was next', async () => {
     await h.director.start({ topic: 'x', first: 'egg' });
     h.director.pause();
