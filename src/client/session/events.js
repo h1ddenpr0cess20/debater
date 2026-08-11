@@ -48,6 +48,36 @@ export function createEventHandler({
   let called = new Set();
   /** The response now running, so samples from a cancelled one can be told apart. */
   let current = null;
+  /**
+   * Responses this lectern is no longer giving — talked over, or refused by the
+   * proxy because nobody asked for them.
+   *
+   * Only the xAI engine needs this, and it needs it badly. The OpenAI session is
+   * dialled with `interrupt_response: true`, so being talked over cancels the
+   * answer at the far end and nothing more arrives for it. xAI has no such flag:
+   * the response carries on generating, and its audio and transcript keep coming
+   * down the socket. Without somewhere to write off a response, this lectern
+   * goes quiet for a beat and then finishes a sentence the room has moved on
+   * from — over whoever interrupted them.
+   */
+  let abandoned = new Set();
+
+  /** Whether a frame belongs to a response that has been written off. */
+  function stale(event) {
+    return Boolean(event.response_id) && abandoned.has(event.response_id);
+  }
+
+  /**
+   * This lectern is not finishing what it was saying. The queue goes, and the
+   * response that was playing is written off so the rest of it — audio and
+   * transcript both, already sent and still in flight — is dropped.
+   */
+  function abandon() {
+    flushAudio();
+    if (current) abandoned.add(current);
+    current = null;
+    flush();
+  }
 
   function flush() {
     if (transcript) record({ role: 'assistant', content: transcript });
@@ -93,15 +123,36 @@ export function createEventHandler({
         break;
 
       /**
+       * The proxy refused a response this lectern gave without being asked. It
+       * is already cancelled upstream, but a cancel is a round trip and there is
+       * audio in the air behind it — so the id comes down ahead of the cancel
+       * and everything still to arrive for it is dropped here.
+       */
+      case 'proxy.refused':
+        if (event.response_id) abandoned.add(event.response_id);
+        if (current === event.response_id) {
+          flushAudio();
+          current = null;
+          transcript = '';
+        }
+        break;
+
+      /**
        * Somebody has started talking at this lectern — the other one, or the
-       * moderator over the top of everything. The session is dialled to let
-       * that cut its own answer off, so anything of ours still scheduled to
-       * play is no longer going to be said, and holding on to it would have
-       * this lectern finish a sentence the far end has already abandoned.
+       * moderator over the top of everything.
+       *
+       * Mid-answer that is an interruption, and the answer is written off: on
+       * xAI nothing cancels it upstream, so the only thing stopping this lectern
+       * talking over whoever cut in is this. Between answers it is just the room
+       * being heard, and there is nothing to write off.
        */
       case 'input_audio_buffer.speech_started':
-        if (playing()) flushAudio();
-        flush();
+        if (playing()) {
+          emit('interrupted');
+          abandon();
+        } else {
+          flush();
+        }
         emit('speech', { started: true });
         setState('listening');
         break;
@@ -138,11 +189,11 @@ export function createEventHandler({
       case 'response.output_audio.delta':
       case 'response.audio.delta': {
         /**
-         * Audio from a response that is no longer the one running. The proxy
-         * cancels every answer this lectern gave without being asked, and a
-         * cancelled response has samples already in the air behind it — playing
-         * them puts a voice in the room that nobody handed the floor to.
+         * Audio from a response that is no longer the one running, or one that
+         * has been written off. Both put a voice in the room that nobody handed
+         * the floor to — the second one over the top of whoever has it.
          */
+        if (stale(event)) break;
         if (current && event.response_id && event.response_id !== current) break;
         const samples = decodePCM(event.delta);
         if (samples) play(samples);
@@ -154,6 +205,7 @@ export function createEventHandler({
       case 'response.audio_transcript.delta':
       case 'response.output_text.delta':
       case 'response.text.delta':
+        if (stale(event)) break;
         setState('speaking');
         transcript += event.delta ?? '';
         emit('text', event.delta ?? '');
@@ -167,6 +219,7 @@ export function createEventHandler({
        */
       case 'response.output_audio_transcript.updated':
       case 'response.output_text.updated': {
+        if (stale(event)) break;
         const whole = event.transcript ?? event.text ?? transcript;
         const added = whole.startsWith(transcript) ? whole.slice(transcript.length) : whole;
         transcript = whole;
@@ -200,6 +253,9 @@ export function createEventHandler({
       case 'response.done': {
         setResponding(false);
         const response = event.response ?? {};
+        /** The end of a response that was written off closes the book on it:
+         *  nothing else can arrive for it, so it stops being watched for. */
+        const over = Boolean(response.id) && abandoned.delete(response.id);
         for (const item of response.output ?? []) {
           if (item?.type === 'function_call') dispatch(item);
         }
@@ -207,10 +263,20 @@ export function createEventHandler({
         if (response.status === 'failed') {
           fail(response.status_details?.error?.message ?? 'the response failed');
         }
-        emit('done', { model: getModel(), usage: response.usage });
+        /**
+         * `cancelled` is the whole of what the floor above needs from this: a
+         * response that was written off or cancelled is not a turn this lectern
+         * took, and counting it as one spends the debate's turn budget on
+         * answers nobody heard and hands the floor over mid-sentence.
+         */
+        emit('done', {
+          model: getModel(),
+          usage: response.usage,
+          cancelled: over || response.status === 'cancelled',
+        });
         /** Generation is over; the audio may not be. On the engine that plays
          *  its own samples, "speaking" lasts as long as there are samples. */
-        if (!playing()) setState('listening');
+        if (!over && !playing()) setState('listening');
         break;
       }
 
@@ -234,6 +300,7 @@ export function createEventHandler({
       transcript = '';
       called = new Set();
       current = null;
+      abandoned = new Set();
     },
   };
 }

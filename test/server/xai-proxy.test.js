@@ -175,6 +175,15 @@ describe('the floor', () => {
     floor.reset();
     assert.equal(floor.created(), false);
   });
+
+  /** A credit spent on a response that was created is not one reset can take. */
+  it('cannot take back a credit a live response already spent', () => {
+    const floor = createFloor();
+    floor.asked();
+    assert.equal(floor.created(), true);
+    floor.reset();
+    assert.equal(floor.outstanding, 0);
+  });
 });
 
 describe('the proxy', () => {
@@ -233,8 +242,21 @@ describe('the proxy', () => {
       prefix_padding_ms: 333,
       silence_duration_ms: 520,
     });
-    assert.deepEqual(Object.keys(first.session.audio.input).sort(), ['format', 'transport']);
+    assert.deepEqual(
+      Object.keys(first.session.audio.input).sort(),
+      ['format', 'transcription', 'transport'],
+    );
     assert.deepEqual(first.session.audio.output.format, { type: 'audio/pcm', rate: 24000 });
+  });
+
+  /**
+   * xAI sends the transcription events only when a model is named, and the
+   * moderator is the thing that needs them: naming a debater, and getting the
+   * question into the log, are both read off what the microphone said.
+   */
+  it('asks for the microphone to be transcribed', async () => {
+    const [first] = xai.received();
+    assert.deepEqual(first.session.audio.input.transcription, { model: 'grok-transcribe' });
   });
 
   it('puts the motion in the instructions, from the query and nowhere else', async () => {
@@ -301,6 +323,46 @@ describe('the proxy', () => {
     const before = xai.received().length;
 
     xai.send({ type: 'response.created', response: { id: 'resp_1' } });
+    await settle();
+
+    assert.deepEqual(xai.received().slice(before).map((f) => f.type), ['response.cancel']);
+  });
+
+  /**
+   * A cancel is a round trip and xAI has audio in the air behind a response by
+   * the time one lands. The page is told which response is being refused so it
+   * can drop the rest of it rather than playing an answer nobody asked for over
+   * whoever has the floor.
+   */
+  it('names the refused response to the page, ahead of the cancel', async () => {
+    const client = await app.openSocket('?debater=egg');
+    await client.waitFor('proxy.ready');
+
+    xai.send({ type: 'response.created', response: { id: 'resp_7' } });
+    const refused = await client.waitFor('proxy.refused');
+
+    assert.equal(refused.response_id, 'resp_7');
+  });
+
+  /**
+   * The leak this closes: a `response.create` refused upstream never comes back
+   * as `response.created`, so the credit for it was never spent — and the next
+   * answer nobody asked for was let through on it.
+   */
+  it('does not let an error bank a credit for an unsolicited answer', async () => {
+    const client = await app.openSocket('?debater=egg');
+    await client.waitFor('proxy.ready');
+
+    client.send({ type: 'response.create' });
+    await settle();
+    xai.send({
+      type: 'error',
+      error: { message: 'conversation already has an active response' },
+    });
+    await settle();
+    const before = xai.received().length;
+
+    xai.send({ type: 'response.created', response: { id: 'resp_8' } });
     await settle();
 
     assert.deepEqual(xai.received().slice(before).map((f) => f.type), ['response.cancel']);

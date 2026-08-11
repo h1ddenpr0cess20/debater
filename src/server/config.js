@@ -130,12 +130,12 @@ function loadXai(env) {
     voices: [...XAI_VOICES],
     debaterVoices: voices,
     /**
-     * Every frame to and from xAI, in the terminal running the server, minus the
-     * audio. On by default: a debate that does nothing and says nothing about
-     * why is the failure this engine keeps landing in, and the proxy is the only
-     * thing that sees both halves of it. `XAI_TRACE=0` once it is behaving.
+     * Every frame to and from xAI, in the terminal running the server, minus
+     * the audio. Off by default now that the engine behaves — it is a JSON
+     * parse and a line per frame, and most frames are transcript deltas.
+     * `XAI_TRACE=1` brings it back when this needs debugging from both halves.
      */
-    trace: flag(env.XAI_TRACE, true),
+    trace: flag(env.XAI_TRACE, false),
     /**
      * Server-side tools, all of them executed by xAI rather than by us — no
      * keys of ours, no connector, nothing spawned on this machine. Which is

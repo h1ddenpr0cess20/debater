@@ -9,6 +9,10 @@ an ordinary conversation with a person, and the person is the opposite lectern.
 You are the moderator. There is a microphone and a text field, both of which
 reach both of them, and a stop button that hangs the whole thing up.
 
+![The hall, with Tater and Marc at their lecterns](docs/screenshots/desktop.png)
+
+<img src="docs/screenshots/mobile.png" alt="The same room on a phone" width="320">
+
 ## Run
 
 ```sh

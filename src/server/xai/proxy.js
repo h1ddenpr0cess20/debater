@@ -54,6 +54,17 @@ export const HISTORY_EVENT = 'session.history';
 const HISTORY_TURNS = 40;
 const HISTORY_CHARS = 6000;
 
+/**
+ * The proxy's own frame down to the page: an answer this lectern gave without
+ * being asked, which has just been cancelled upstream.
+ *
+ * The cancel is a round trip, and xAI has seconds of audio in the air behind a
+ * response by the time it lands. The page cannot tell that audio from an answer
+ * somebody wanted, so it is told the id the moment the decision is made and
+ * drops everything that arrives for it.
+ */
+export const REFUSED_EVENT = 'proxy.refused';
+
 /** How long a motion may be. `topicBlock` caps it again on the way in. */
 const TOPIC_CHARS = 400;
 
@@ -62,7 +73,7 @@ const TOPIC_CHARS = 400;
  * forwarded as bytes — audio deltas are most of the traffic and the largest, and
  * none of this is worth a JSON.parse of every one of them.
  */
-const INSPECT = /"(response\.created|response\.done)"/;
+const INSPECT = /"(response\.created|response\.done|error)"/;
 
 /**
  * What the page sent, cut back to turns this will actually replay. The content
@@ -291,11 +302,30 @@ export function createXaiProxy(config) {
       if (event.type === 'response.created') {
         if (floor.created()) return;
         console.warn(`xai: ${call.id} answered without being asked — cancelling`);
+        /** Ahead of the cancel, so the page stops playing it before xAI stops
+         *  sending it. Everything already in the air is dropped there. */
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: REFUSED_EVENT,
+            response_id: event.response?.id ?? null,
+          }));
+        }
         sendUp({ type: 'response.cancel' });
         return;
       }
 
-      /** A response that failed outright is one the page is no longer owed. */
+      /**
+       * A response the page was owed that is not coming.
+       *
+       * Both cases are the same problem: a credit that is never spent leaves the
+       * floor thinking one more answer is expected than really is, and the next
+       * response nobody asked for is let through on it. An `error` is most often
+       * a second `response.create` refused while one was running — the page
+       * asked, and the answer to that ask does not exist. Credits are spent at
+       * `response.created`, so a response genuinely in flight has already taken
+       * its one and this clears nothing it needs.
+       */
+      if (event.type === 'error') return floor.reset();
       if (event.type === 'response.done' && event.response?.status === 'failed') floor.reset();
     }
 
