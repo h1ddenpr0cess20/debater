@@ -432,6 +432,26 @@ describe('an answer that was cut off', () => {
     assert.equal(h.of('done').at(-1).cancelled, true);
   });
 
+  /**
+   * The same thing, asked for from outside: the session was told to stop, which
+   * is what the moderator cutting in comes down to. The cancel is a round trip
+   * and the frames already sent arrive after it, so writing the response off is
+   * the only thing that stops them being played and captioned as though they
+   * were wanted.
+   */
+  it('drops what is still in the air when it is told to stop answering', () => {
+    const h = speaking();
+    h.handler.abandon();
+    h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });
+    h.feed({ type: 'response.output_audio_transcript.delta', response_id: 'resp_1', delta: 'as I was' });
+    h.feed({ type: 'response.done', response: { id: 'resp_1', status: 'completed' } });
+
+    assert.equal(h.player.flushes, 1);
+    assert.equal(h.played.length, 1, 'only what played before it was cut off');
+    assert.deepEqual(h.of('text'), [], 'the caption grew from a turn nobody is listening to');
+    assert.equal(h.of('done').at(-1).cancelled, true);
+  });
+
   it('leaves an answer that was never interrupted alone', () => {
     const h = speaking();
     h.feed({ type: 'response.output_audio.delta', response_id: 'resp_1', delta: PCM });

@@ -68,15 +68,19 @@ export function createEventHandler({
   }
 
   /**
-   * This lectern is not finishing what it was saying. The queue goes, and the
-   * response that was playing is written off so the rest of it — audio and
-   * transcript both, already sent and still in flight — is dropped.
+   * This lectern is not finishing what it was saying. The response that was
+   * playing is written off so the rest of it — audio and transcript both,
+   * already sent and still in flight — is dropped, and the queue goes with it.
+   *
+   * The books are closed before the audio is, because dropping the audio is
+   * what tells the floor above this lectern has stopped, and it will ask for
+   * the next answer on the strength of it.
    */
   function abandon() {
-    flushAudio();
     if (current) abandoned.add(current);
     current = null;
     flush();
+    flushAudio();
   }
 
   function flush() {
@@ -294,6 +298,18 @@ export function createEventHandler({
 
   return {
     handle,
+
+    /**
+     * Written off from outside — the session was told to stop answering.
+     *
+     * A `response.cancel` is a round trip, and this engine keeps generating and
+     * sending until it lands. Without this the frames still in the air are
+     * played and captioned as though they were wanted, which is a lectern
+     * finishing its sentence over whoever cut in — the moderator, most often,
+     * because cutting in is what a moderator does.
+     */
+    abandon,
+
     get responding() { return responding; },
     reset() {
       setResponding(false);

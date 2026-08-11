@@ -147,6 +147,11 @@ export function createDirector({
    * Cancelling is a message, not an instant: the response is only really gone
    * when its `done` comes back. Asking in between is the same refusal as asking
    * during it, which is what moderating over the top of someone used to do.
+   *
+   * And an answer outlives its own `done`, by however long it takes to say —
+   * which the engine that holds its own audio reports as a state of its own.
+   * Both of those end in a lectern saying it has stopped, and `release` is the
+   * one thing that empties this.
    */
   const queued = Object.fromEntries(order.map((id) => [id, null]));
   /** What the microphone said, as transcribed by whichever session got it first. */
@@ -313,6 +318,32 @@ export function createDirector({
   }
 
   /**
+   * Takes an ask back off the shelf.
+   *
+   * `ask` shelves rather than declines when the lectern is mid-answer, and this
+   * is the only thing that ever takes one down again — so it has to run on
+   * every way an answer can end, not just on the tidy one. `done` is the tidy
+   * one. The other is a lectern that finished generating a while ago and has
+   * been playing the answer out ever since: on the xAI engine that is a state
+   * of its own, it can last seconds, and a moderator typing a question into it
+   * was the surest way to find that out.
+   */
+  function release(id) {
+    const waiting = queued[id];
+    if (!waiting || phase !== 'running') return;
+    queued[id] = null;
+    /**
+     * And back on the shelf if it still cannot go. `ask` declines for reasons
+     * that pass — they are still talking, they still owe us the answer this is
+     * waiting on — and every one of them turns up here, because this runs on a
+     * lectern reporting in rather than on the answer being over. Taking one
+     * down and dropping it is the failure this exists to stop, one step further
+     * along.
+     */
+    if (!ask(id, waiting)) queued[id] ??= waiting;
+  }
+
+  /**
    * Hands the turn to one of them, once they have actually heard it.
    *
    * Their session says so by committing the incoming audio, which arrives here
@@ -416,7 +447,11 @@ export function createDirector({
         takeFloor(agent.id);
         finished[agent.id] = false;
         quiet[agent.id] = null;
+        return;
       }
+      /** They have stopped talking — which is not the same event as having
+       *  stopped generating, and is the one an ask can be waiting on. */
+      release(agent.id);
     });
 
     agent.on('pulse', (weight) => emit('pulse', { id: agent.id, weight }));
@@ -486,9 +521,7 @@ export function createDirector({
       /** They have answered; they may be asked again — and if something was
        * waiting on exactly that, it goes now. */
       pending[agent.id] = false;
-      const waiting = queued[agent.id];
-      queued[agent.id] = null;
-      if (waiting && phase === 'running') ask(agent.id, waiting);
+      release(agent.id);
       /**
        * A cancelled answer is not a turn. It was talked over, or it was one of
        * the answers this engine gives unasked and the proxy refused — either
@@ -628,11 +661,17 @@ export function createDirector({
     emit('turn', { speaker: MODERATOR, content: line });
 
     const target = to ?? named(line) ?? next ?? order[0];
-    /** Whoever was mid-answer is talked over, which is a moderator's privilege. */
+    /**
+     * Whoever was mid-answer is talked over, which is a moderator's privilege.
+     * Anything shelved for them is dropped first: the moderator has just said
+     * who is answering this, and cutting a lectern off is exactly the moment an
+     * ask waiting on them to stop would otherwise go out.
+     */
     for (const agent of agents) {
       if (agent.id === target) continue;
-      agent.cancel();
+      queued[agent.id] = null;
       pending[agent.id] = false;
+      agent.cancel();
     }
 
     disarm('hand');
@@ -640,13 +679,31 @@ export function createDirector({
     route(target);
 
     /**
+     * Nobody's turn ends on the back of this. Whoever was talking has just been
+     * cut off by the moderator, so the silence that follows is the moderator's
+     * doing — and handing the floor on for it would put a second question over
+     * the top of the one just asked.
+     */
+    for (const id of order) {
+      finished[id] = false;
+      quiet[id] = null;
+    }
+
+    /**
      * The one being asked may be mid-answer too — a question put over the top
      * of them replaces it. Their answer has to actually be gone before the next
-     * can be asked for, so this waits for its `done` rather than racing it.
+     * can be asked for, so this waits for it rather than racing it.
+     *
+     * Mid-answer is not only a response still generating. A lectern that
+     * finished generating and is still saying the words is mid-answer as far as
+     * the room is concerned, and on the xAI engine it is mid-answer for seconds
+     * — long enough that a typed question aimed at whoever had just answered
+     * landed there almost every time. `release` is what picks this back up.
      */
-    if (roster[target]?.busy) {
+    const them = roster[target];
+    if (them?.busy || them?.state === 'speaking') {
       queued[target] = {};
-      roster[target].cancel();
+      them.cancel();
       return true;
     }
 
@@ -734,9 +791,11 @@ export function createDirector({
     if (phase !== 'running') return;
     bus.silence();
     for (const agent of agents) {
-      agent.cancel();
+      /** Emptied before they are cut off, not after: stopping one of them is
+       *  itself something an ask can be waiting on. */
       pending[agent.id] = false;
       queued[agent.id] = null;
+      agent.cancel();
       bus.live(agent.id, false);
     }
     disarm('ask', 'hand', 'heard');
@@ -771,9 +830,9 @@ export function createDirector({
     frame = 0;
     bus.silence();
     for (const agent of agents) {
-      agent.stop();
       pending[agent.id] = false;
       queued[agent.id] = null;
+      agent.stop();
     }
     for (const id of order) emit('level', { id, level: 0 });
     floor = null;
