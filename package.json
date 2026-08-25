@@ -24,9 +24,9 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
-    "eslint": "^10.8.0",
+    "eslint": "^10.9.0",
     "globals": "^17.11.0",
     "jsdom": "^30.0.1",
-    "vite": "^8.2.1"
+    "vite": "^8.2.2"
   }
 }
