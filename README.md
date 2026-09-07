@@ -99,6 +99,9 @@ sessions have reported so far.
 
 ## What is where
 
+`menu`, in the top corner, is where the panels live: `tools`, `connectors` and
+`log`, one row each. Picking a row closes the menu behind it.
+
 `tools` is the per-debate switch panel, and what is in it is whatever the engine
 running has. On xAI that is web search, X search and any MCP server the
 environment names; on OpenAI it is empty, because the connectors are. A switch

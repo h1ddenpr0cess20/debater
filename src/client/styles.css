@@ -144,15 +144,13 @@ three-d-stage {
 #notice.error { color: #ff9b9b; }
 
 /** Back in the corner, over the scene, where they were. */
-#tabs {
+#menu {
   position: fixed;
   top: calc(env(safe-area-inset-top) + 10px);
   right: calc(env(safe-area-inset-right) + var(--gutter));
   z-index: 7;
-  display: flex;
-  gap: 8px;
 }
-#tabs button {
+#menu-toggle {
   appearance: none;
   cursor: pointer;
   padding: 10px 13px;
@@ -162,8 +160,38 @@ three-d-stage {
   color: rgba(255, 255, 255, .6);
   transition: border-color .2s, color .2s;
 }
-#tabs button:hover { color: rgba(255, 255, 255, .9); border-color: rgba(255, 255, 255, .28); }
-#connectors-toggle.live { color: var(--listening); border-color: rgba(127, 201, 240, .4); }
+#menu-toggle:hover { color: rgba(255, 255, 255, .9); border-color: rgba(255, 255, 255, .28); }
+
+/* The list the button drops: one panel per row, and nothing else. */
+#menu-items {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 20px;
+  background: rgba(11, 12, 16, .97);
+  border: 1px solid rgba(255, 255, 255, .14);
+}
+#menu-items[hidden] { display: none; }
+#menu-items button {
+  appearance: none;
+  cursor: pointer;
+  padding: 11px 12px;
+  border-radius: 999px;
+  background: none;
+  border: 0;
+  color: rgba(255, 255, 255, .6);
+  text-align: left;
+  white-space: nowrap;
+  transition: color .2s, background-color .2s;
+}
+#menu-items button:hover { color: rgba(255, 255, 255, .9); background: rgba(255, 255, 255, .07); }
+/* Work still running, said on the row and on the closed menu alike. */
+#connectors-toggle.live { color: var(--listening); }
+#menu-toggle.live { color: var(--listening); border-color: rgba(127, 201, 240, .4); }
 
 /* ── the two lecterns ────────────────────────────────────────────────────── */
 
@@ -781,8 +809,8 @@ three-d-stage {
 @media (max-width: 720px) {
   :root { --gutter: 14px; }
 
-  /** The corner is the tabs' on a phone, so the header starts under them. */
-  #tabs { top: calc(env(safe-area-inset-top) + 4px); }
+  /** The corner is the menu's on a phone, so the header starts under it. */
+  #menu { top: calc(env(safe-area-inset-top) + 4px); }
   #bar { gap: 8px 10px; padding-top: 52px; }
 
   #floor { gap: 8px 10px; }
@@ -801,10 +829,14 @@ three-d-stage {
 }
 
 @media (pointer: coarse) {
-  #tabs button { padding: 13px 15px; }
+  #menu-toggle, #menu-items button { padding: 13px 15px; }
   #mic, #controls .round { width: 44px; height: 44px; }
   #start { padding: 13px 18px; }
-  #tabs button:hover { color: rgba(255, 255, 255, .6); border-color: rgba(255, 255, 255, .14); }
+  #menu-toggle:hover, #menu-items button:hover {
+    color: rgba(255, 255, 255, .6);
+    border-color: rgba(255, 255, 255, .14);
+    background: none;
+  }
   #mic:hover, #controls .round:hover {
     background: rgba(255, 255, 255, .09);
     color: rgba(255, 255, 255, .7);
@@ -818,7 +850,7 @@ three-d-stage {
 @media (prefers-reduced-motion: reduce) {
   #phase, #motion, #notice, .lectern, .lectern .caption, #controls,
   #mic, #controls .round, #start, #controls .ghost, #heckle,
-  #model, .cap, .voice select, #tabs button {
+  #model, .cap, .voice select, #menu-toggle, #menu-items button {
     transition-duration: .01ms;
   }
 }
