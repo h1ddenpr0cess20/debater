@@ -42,14 +42,18 @@
 </div>
 </div>
 
-<div id="tabs">
+<nav id="menu" aria-label="Panels">
+  <button id="menu-toggle" class="chip" type="button" aria-expanded="false"
+          aria-controls="menu-items">menu</button>
+  <div id="menu-items" hidden>
     <button id="toolbox-toggle" class="chip" type="button" aria-expanded="false"
             aria-controls="toolbox">tools</button>
     <button id="connectors-toggle" class="chip" type="button" aria-expanded="false"
             aria-controls="connectors">connectors</button>
     <button id="log-toggle" class="chip" type="button" aria-expanded="false"
             aria-controls="log">log</button>
-</div>
+  </div>
+</nav>
 
 <form id="controls">
   <div id="motion-row">

@@ -13,6 +13,7 @@ import { createToolSwitches } from './tools.js';
 import { createConnectorsPanel } from './ui/connectors.js';
 import { createControls } from './ui/controls.js';
 import { createHud } from './ui/hud.js';
+import { createMenu } from './ui/menu.js';
 import { stripStageChrome } from './ui/stage.js';
 import { createToolsPanel } from './ui/tools.js';
 import { createTranscriptPanel } from './ui/transcript.js';
@@ -26,6 +27,7 @@ const hall = buildHall({ stage, THREE });
 const rigs = { egg: hall.egg, potato: hall.potato };
 
 const hud = createHud();
+const menu = createMenu();
 const transcripts = createTranscripts();
 const switches = createToolSwitches();
 
@@ -150,6 +152,7 @@ const controls = createControls({
     if (toolsPanel.isOpen) return toolsPanel.close();
     if (connectorsPanel.isOpen) return connectorsPanel.close();
     if (transcriptPanel.isOpen) return transcriptPanel.close();
+    if (menu.isOpen) return menu.close();
     /** Nothing open to close: the escape hatch is the one that costs money. */
     director?.stop('stopped');
     controls.sync();

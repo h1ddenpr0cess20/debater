@@ -160,7 +160,7 @@ main.js ──▶ stage/       the hall: two spots, two lecterns, two rigs
         ──▶ audio/bus    the gates
         ──▶ session/     one realtime call per lectern, on either engine
         ──▶ debate/      the director, the moderator, the transcript
-        ──▶ ui/          the bar, the captions, the panels
+        ──▶ ui/          the bar, the captions, the corner menu and its panels
 ```
 
 The director ([`src/client/debate/director.js`](../src/client/debate/director.js))
