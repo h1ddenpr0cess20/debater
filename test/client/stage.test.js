@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import * as THREE from 'three';
+import * as GFX from '../../src/client/vendor/gfx/index.js';
 
 import { createEgg } from '../../src/client/stage/egg/index.js';
 import { createPotato } from '../../src/client/stage/potato/index.js';
@@ -19,8 +19,8 @@ describe('sweep', () => {
 
 /** The rigs, stood up the way the hall stands them up. */
 function spot(make, name) {
-  const podium = createPodium(THREE, { name });
-  const rig = podium.stand(make({ THREE, shadow: podium.blot }));
+  const podium = createPodium(GFX, { name });
+  const rig = podium.stand(make({ GFX, shadow: podium.blot }));
   podium.group.updateWorldMatrix(false, true);
   return { podium, rig };
 }
@@ -28,15 +28,15 @@ function spot(make, name) {
 for (const [name, make] of [['the egg', createEgg], ['the potato', createPotato]]) {
   describe(`${name} on its spot`, () => {
     const { podium, rig } = spot(make, name.replace(/\s/g, '-'));
-    const body = new THREE.Box3().setFromObject(rig.group);
-    const lectern = new THREE.Box3().setFromObject(podium.lectern);
+    const body = new GFX.Box3().setFromObject(rig.group);
+    const lectern = new GFX.Box3().setFromObject(podium.lectern);
 
     it('stands on the floor rather than in it or above it', () => {
       assert.ok(Math.abs(body.min.y) < 1e-6, `${name} rests at ${body.min.y}`);
     });
 
     it('is the same height as the other one, whatever it is made of', () => {
-      const size = body.getSize(new THREE.Vector3());
+      const size = body.getSize(new GFX.Vector3());
       assert.ok(Math.abs(size.y - HEIGHT) < 1e-6, `${name} is ${size.y} tall`);
     });
 
@@ -57,7 +57,7 @@ for (const [name, make] of [['the egg', createEgg], ['the potato', createPotato]
      * is — including straight at the furniture.
      */
     it('cannot reach the lectern in any pose it has', () => {
-      const size = new THREE.Box3().setFromObject(rig.group).getSize(new THREE.Vector3());
+      const size = new GFX.Box3().setFromObject(rig.group).getSize(new GFX.Vector3());
       const scale = podium.slot.scale.x;
       /** The rig's own origin is where it pivots; the sweep is measured from it. */
       const origin = podium.slot.position.z;

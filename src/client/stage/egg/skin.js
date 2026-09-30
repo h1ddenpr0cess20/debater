@@ -13,7 +13,7 @@ function canvas2d(width, height) {
   return ctx ? { el, ctx } : null;
 }
 
-export function createShellSkin(THREE, { width = WIDTH, height = HEIGHT, random = Math.random } = {}) {
+export function createShellSkin(GFX, { width = WIDTH, height = HEIGHT, random = Math.random } = {}) {
   const colour = canvas2d(width, height);
   const bump = canvas2d(width, height);
   if (!colour || !bump) return INERT;
@@ -44,10 +44,10 @@ export function createShellSkin(THREE, { width = WIDTH, height = HEIGHT, random 
     b.fill();
   }
 
-  const map = new THREE.CanvasTexture(colour.el);
-  map.colorSpace = THREE.SRGBColorSpace;
+  const map = new GFX.CanvasTexture(colour.el);
+  map.colorSpace = GFX.SRGBColorSpace;
   map.anisotropy = 4;
-  const bumpMap = new THREE.CanvasTexture(bump.el);
+  const bumpMap = new GFX.CanvasTexture(bump.el);
 
   return { map, bumpMap };
 }

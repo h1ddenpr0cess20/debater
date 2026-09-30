@@ -26,7 +26,7 @@ const COLUMN = { w: 0.86, h: 1.08, d: 0.52 };
 const DESK = { w: 1.44, h: 0.10, d: 0.76 };
 
 /** The soft blot a debater gets instead of a shadow map. */
-export function shadowTexture(THREE) {
+export function shadowTexture(GFX) {
   if (typeof document === 'undefined') return null;
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -38,13 +38,13 @@ export function shadowTexture(THREE) {
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
+  const tex = new GFX.CanvasTexture(c);
+  tex.colorSpace = GFX.SRGBColorSpace;
   return tex;
 }
 
-function box(THREE, { w, h, d }, material, name, y) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+function box(GFX, { w, h, d }, material, name, y) {
+  const mesh = new GFX.Mesh(new GFX.BoxGeometry(w, h, d), material);
   mesh.name = name;
   mesh.position.y = y;
   return mesh;
@@ -68,52 +68,52 @@ export function sweep({ x, y, z }, reach = 0) {
  * carrying the party colour. `accent` is the only thing that differs between
  * the two of them.
  */
-export function createPodium(THREE, { name = 'podium', accent = '#8a8f98' } = {}) {
-  const group = new THREE.Group();
+export function createPodium(GFX, { name = 'podium', accent = '#8a8f98' } = {}) {
+  const group = new GFX.Group();
   group.name = name;
 
-  const timber = new THREE.MeshStandardMaterial({
+  const timber = new GFX.MeshStandardMaterial({
     name: `${name}-timber`,
     color: 0x2b2723,
     roughness: 0.72,
     metalness: 0.04,
   });
-  const edge = new THREE.MeshStandardMaterial({
+  const edge = new GFX.MeshStandardMaterial({
     name: `${name}-edge`,
     color: 0x3a342e,
     roughness: 0.55,
     metalness: 0.08,
   });
-  const panel = new THREE.MeshStandardMaterial({
+  const panel = new GFX.MeshStandardMaterial({
     name: `${name}-panel`,
-    color: new THREE.Color(accent),
+    color: new GFX.Color(accent),
     roughness: 0.62,
     metalness: 0.05,
   });
 
   /** The furniture, as one thing, so it can be pushed forward in one move. */
-  const lectern = new THREE.Group();
+  const lectern = new GFX.Group();
   lectern.name = `${name}-lectern`;
 
-  lectern.add(box(THREE, BASE, edge, `${name}-base`, BASE.h / 2));
-  lectern.add(box(THREE, COLUMN, timber, `${name}-column`, BASE.h + COLUMN.h / 2));
+  lectern.add(box(GFX, BASE, edge, `${name}-base`, BASE.h / 2));
+  lectern.add(box(GFX, COLUMN, timber, `${name}-column`, BASE.h + COLUMN.h / 2));
 
   /** The reading surface, tipped up towards whoever is behind it. */
-  const desk = box(THREE, DESK, edge, `${name}-desk`, TOP - DESK.h / 2);
+  const desk = box(GFX, DESK, edge, `${name}-desk`, TOP - DESK.h / 2);
   desk.rotation.x = 0.15;
   lectern.add(desk);
 
   /** The front panel, which is the only place either side says which it is. */
-  const front = box(THREE, { w: 0.96, h: 0.64, d: 0.04 }, panel, `${name}-front`, 0.66);
+  const front = box(GFX, { w: 0.96, h: 0.64, d: 0.04 }, panel, `${name}-front`, 0.66);
   front.position.z = COLUMN.d / 2 + 0.01;
   lectern.add(front);
 
   group.add(lectern);
 
-  const texture = shadowTexture(THREE);
-  const blot = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.3, 1.3),
-    new THREE.MeshBasicMaterial({
+  const texture = shadowTexture(GFX);
+  const blot = new GFX.Mesh(
+    new GFX.PlaneGeometry(1.3, 1.3),
+    new GFX.MeshBasicMaterial({
       name: `${name}-blot`,
       map: texture,
       transparent: true,
@@ -130,7 +130,7 @@ export function createPodium(THREE, { name = 'podium', accent = '#8a8f98' } = {}
    * Where the rig hangs — the origin, and the thing the whole spot is placed
    * by. The blot rides inside it, so it moves in the same units the rig does.
    */
-  const slot = new THREE.Group();
+  const slot = new GFX.Group();
   slot.name = `${name}-slot`;
   slot.add(blot);
   group.add(slot);
@@ -154,9 +154,9 @@ export function createPodium(THREE, { name = 'podium', accent = '#8a8f98' } = {}
     stand(rig, { height = HEIGHT, margin = MARGIN } = {}) {
       /** Measured before it is parented, so the box is in the rig's own space. */
       rig.group.updateWorldMatrix(false, true);
-      const bounds = new THREE.Box3().setFromObject(rig.group);
+      const bounds = new GFX.Box3().setFromObject(rig.group);
       if (!bounds.isEmpty()) {
-        const size = bounds.getSize(new THREE.Vector3());
+        const size = bounds.getSize(new GFX.Vector3());
         const scale = size.y > 0 ? height / size.y : 1;
         slot.scale.setScalar(scale);
         slot.position.y = -bounds.min.y * scale;
@@ -164,7 +164,7 @@ export function createPodium(THREE, { name = 'podium', accent = '#8a8f98' } = {}
         /** Off the furniture's own bounds: the desk is tilted, so it reaches
          *  further back than half its depth, and half its depth would lie. */
         lectern.position.z = 0;
-        const furniture = new THREE.Box3().setFromObject(lectern);
+        const furniture = new GFX.Box3().setFromObject(lectern);
         lectern.position.z = sweep(size, rig.reach ?? 0) * scale + margin - furniture.min.z;
       }
       slot.add(rig.group);

@@ -1,5 +1,6 @@
 import { buildEnvironment, dropShadows } from './environment.js';
 import { createEgg } from './egg/index.js';
+import { keepOut } from './keepout.js';
 import { buildPan, liftOverRim, polarOverRim } from './pan.js';
 import { createPodium, TOP } from './podium.js';
 import { createPotato } from './potato/index.js';
@@ -48,8 +49,18 @@ const FOOTROOM = 0.16;
 
 const ACCENT = { left: '#2f5d92', right: '#8e3232' };
 
-/** As far down as the shot may ever be dragged, rim or no rim. */
-const SWING = Math.PI * 0.495;
+/**
+ * The first shot: no further out than this, and swung no lower than sees over
+ * the near rim. They used to be limits on the camera, and they are the shot
+ * everyone has been looking at; now they are only where it starts.
+ */
+const FIRST = { farthest: 16, swing: Math.PI * 0.495 };
+
+/**
+ * How far out the camera may be pulled: far enough to have the whole pan, handle
+ * and all, small in the frame, on any window.
+ */
+const FARTHEST = 60;
 
 /**
  * Builds the hall into the stage and hands back the two rigs, keyed by side.
@@ -59,25 +70,25 @@ const SWING = Math.PI * 0.495;
  * upright is a very different picture from a laptop, and both have to hold both
  * lecterns.
  */
-export function buildHall({ stage, THREE }) {
-  buildEnvironment({ stage, THREE });
+export function buildHall({ stage, GFX }) {
+  buildEnvironment({ stage, GFX });
 
-  const hall = new THREE.Group();
+  const hall = new GFX.Group();
   hall.name = 'hall';
-  hall.add(buildPan(THREE));
+  hall.add(buildPan(GFX));
 
-  const left = createPodium(THREE, { name: 'podium-left', accent: ACCENT.left });
+  const left = createPodium(GFX, { name: 'podium-left', accent: ACCENT.left });
   left.group.position.x = -REACH;
   left.group.rotation.y = TOE_IN;
 
-  const right = createPodium(THREE, { name: 'podium-right', accent: ACCENT.right });
+  const right = createPodium(GFX, { name: 'podium-right', accent: ACCENT.right });
   right.group.position.x = REACH;
   right.group.rotation.y = -TOE_IN;
 
   hall.add(left.group, right.group);
 
-  const potato = left.stand(createPotato({ THREE, shadow: left.blot }));
-  const egg = right.stand(createEgg({ THREE, shadow: right.blot }));
+  const potato = left.stand(createPotato({ GFX, shadow: left.blot }));
+  const egg = right.stand(createEgg({ GFX, shadow: right.blot }));
 
   /**
    * Both lecterns end up as far forward as the roomier of the two debaters
@@ -99,20 +110,20 @@ export function buildHall({ stage, THREE }) {
    * The two lecterns and whoever is standing on them — not the pan, which is
    * scenery and would frame the shot on nothing.
    */
-  const set = new THREE.Box3()
+  const set = new GFX.Box3()
     .setFromObject(left.group)
-    .union(new THREE.Box3().setFromObject(right.group));
-  const middle = set.getCenter(new THREE.Vector3());
-  const span = set.getSize(new THREE.Vector3());
+    .union(new GFX.Box3().setFromObject(right.group));
+  const middle = set.getCenter(new GFX.Vector3());
+  const span = set.getSize(new GFX.Vector3());
 
   /** Every corner of the set. What has to be on screen, all of it, always. */
-  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new GFX.Vector3(
     i & 1 ? set.max.x : set.min.x,
     i & 2 ? set.max.y : set.min.y,
     i & 4 ? set.max.z : set.min.z,
   ));
 
-  const scratch = new THREE.Vector3();
+  const scratch = new GFX.Vector3();
 
   function place(dist) {
     /**
@@ -166,39 +177,37 @@ export function buildHall({ stage, THREE }) {
 
     place(dist * MARGIN);
     controls.target.set(0, middle.y, 0);
+    const shot = new GFX.Spherical().setFromVector3(scratch.copy(camera.position).sub(controls.target));
+    shot.radius = Math.min(shot.radius, FIRST.farthest);
+    shot.phi = Math.min(shot.phi, polarOverRim({ dist: shot.radius, target: middle.y, radius: spread, limit: FIRST.swing }));
+    camera.position.setFromSpherical(shot).add(controls.target);
     controls.update();
   }
 
-  /** Not a turntable, and not somewhere you can get under the floor from. */
+  /**
+   * Not a turntable, but otherwise the camera goes where it is dragged: all
+   * the way round, over the rim, under the pan to look at the bottom of it.
+   * The pan is solid iron from both sides, so there is no angle it is missing
+   * from. The framing is what keeps the rim out of the first shot.
+   */
   controls.autoRotate = false;
-  controls.maxPolarAngle = SWING;
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
   controls.minDistance = 2.5;
-  controls.maxDistance = 16;
+  controls.maxDistance = FARTHEST;
 
   /**
-   * How far out the set reaches, for the swing cap: the corner nearest whoever
-   * is orbiting is the one the rim comes up in front of first.
+   * How far out the set reaches, for the first shot's swing: the corner nearest
+   * the camera is the one the rim comes up in front of first.
    */
   const spread = Math.max(...corners.map((corner) => Math.hypot(corner.x, corner.z)));
 
-  /**
-   * Re-capped as the camera moves, because how far it may swing down depends on
-   * how far out it is. Inside the pan there is nothing between it and the set;
-   * outside, the rim is. Guarded because the clamp is applied by an update, and
-   * an update is what got us here.
-   */
-  let capping = false;
-  controls.addEventListener('change', () => {
-    if (capping) return;
-    capping = true;
-    controls.maxPolarAngle = polarOverRim({
-      dist: camera.position.distanceTo(controls.target),
-      target: controls.target.y,
-      radius: spread,
-      limit: SWING,
-    });
-    controls.update();
-    capping = false;
+  /** And never into either of them — see `keepout.js`. */
+  keepOut({
+    GFX,
+    camera,
+    controls,
+    bodies: [potato.group.getObjectByName('tuber'), egg.group.getObjectByName('shell')],
   });
 
   frame();

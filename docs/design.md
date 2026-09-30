@@ -176,6 +176,12 @@ themselves, and each reports how far it wanders while it talks.
 Both are scaled to the same height. An egg is naturally about twice a potato,
 which is fine when each has an app to itself.
 
+Neither of them is solid — they are skins, drawn from outside — so the camera is
+kept out of both, however far it is zoomed or panned
+([`src/client/stage/keepout.js`](../src/client/stage/keepout.js)). It stops on an
+ellipsoid fenced round each body, which turns and walks with it, far enough out
+that the near plane does not slice into the skin either.
+
 The debater is the origin of their spot, not the lectern: turning the two spots
 inward has to swing the lecterns across the front of them rather than swinging
 the debaters out into the wings. The lectern is then pushed forward by however
@@ -195,14 +201,21 @@ once — the wall closes the room off from every angle, which is what the
 cyclorama it replaced was for — and being solid iron from both sides rather
 than a one-sided wall, it is also something the camera can end up behind.
 
+The handle is the one part that is not turned. It is a flat tab the shape of a
+cast skillet's — flared where it leaves the wall, a waist, a rounded end with a
+teardrop hole — and it is cast into the rim in one piece, fillet and all:
+described as a distance field and meshed by
+[`src/client/stage/cast.js`](../src/client/stage/cast.js). A collar, a bar and a
+ring drawn from primitives never quite met, which is what it used to be.
+
 So the pan owns two rules about the shot, and
 [`test/client/pan.test.js`](../test/client/pan.test.js) is what says so. Both
-spots have to stand on the flat of it, off the roll. And the near rim may never
-come up between the camera and a debater's feet: fitting a wide set into a tall
-window walks the camera clean out of the pan, so the framing raises the shot
-until it sees over the rim, and how far down the shot may be dragged is capped
-by how far out it has been dragged. From inside the pan there is nothing in the
-way and the cap is the one the stage came with.
+spots have to stand on the flat of it, off the roll. And the near rim may not
+come up between the first shot and a debater's feet: fitting a wide set into a
+tall window walks the camera clean out of the pan, so the framing raises the
+shot until it sees over the rim. After that the camera is yours — it orbits all
+the way round and under the pan, and pulls back far enough to have the whole of
+it, handle and all, small in the frame.
 
 ## The server
 

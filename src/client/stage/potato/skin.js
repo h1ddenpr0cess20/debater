@@ -6,10 +6,10 @@ import { HALF } from './shape.js';
  * once it has been pushed this far out of shape, and the mottling wants to
  * follow the lumps anyway — same noise field, netting then patchiness.
  */
-export function paintSkin(THREE, geometry) {
+export function paintSkin(GFX, geometry) {
   const pos = geometry.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const base = new THREE.Color();
+  const base = new GFX.Color();
 
   for (let i = 0; i < pos.count; i++) {
     // Back to the unit sphere, so the field is the one the surface was cut from.
@@ -28,28 +28,28 @@ export function paintSkin(THREE, geometry) {
     colors[i * 3 + 2] = base.b;
   }
 
-  const attribute = new THREE.BufferAttribute(colors, 3);
+  const attribute = new GFX.BufferAttribute(colors, 3);
   geometry.setAttribute('color', attribute);
   return attribute;
 }
 
 /** The mottled skin, a plain one for the eye ridges, and the hollows. */
-export function createSkinMaterials(THREE) {
+export function createSkinMaterials(GFX) {
   return {
-    skin: new THREE.MeshStandardMaterial({
+    skin: new GFX.MeshStandardMaterial({
       name: 'russet-skin',
       color: 0xa97c4c,
       roughness: 0.95,
       metalness: 0,
       vertexColors: true,
     }),
-    plain: new THREE.MeshStandardMaterial({
+    plain: new GFX.MeshStandardMaterial({
       name: 'russet-skin-plain',
       color: 0xa07348,
       roughness: 1,
       metalness: 0,
     }),
-    eye: new THREE.MeshStandardMaterial({
+    eye: new GFX.MeshStandardMaterial({
       name: 'eye-hollow',
       color: 0x4a3116,
       roughness: 1,

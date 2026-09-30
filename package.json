@@ -18,7 +18,6 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "three": "^0.186.1",
     "ws": "^8.22.0"
   },
   "devDependencies": {
