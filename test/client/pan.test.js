@@ -5,7 +5,7 @@ import * as GFX from '../../src/client/vendor/gfx/index.js';
 import { createEgg } from '../../src/client/stage/egg/index.js';
 import { REACH, TOE_IN } from '../../src/client/stage/index.js';
 import {
-  FLAT, RIM_HEIGHT, RIM_RADIUS, liftOverRim, polarOverRim, seesOverRim,
+  FLAT, RIM_HEIGHT, RIM_RADIUS, buildHandle, liftOverRim, polarOverRim, seesOverRim,
 } from '../../src/client/stage/pan.js';
 import { createPodium } from '../../src/client/stage/podium.js';
 import { createPotato } from '../../src/client/stage/potato/index.js';
@@ -126,5 +126,55 @@ describe('the swing the camera is allowed', () => {
     const height = 1.05 + dist * Math.cos(polar);
     const t = (flat - RIM_RADIUS) / (flat - spread);
     assert.ok(height * (1 - t) >= RIM_HEIGHT, 'the rim cuts across the set at the cap');
+  });
+});
+
+describe('the handle', () => {
+  const handle = buildHandle(GFX, new GFX.MeshBasicMaterial());
+  handle.updateMatrixWorld(true);
+  const pos = handle.geometry.attributes.position;
+  const index = handle.geometry.index.array;
+
+  /** In the handle's own frame: across it, off its face, and out along it. */
+  const local = Array.from({ length: pos.count }, (_, i) => [pos.getX(i), pos.getY(i), pos.getZ(i)]);
+  const world = local.map((p) => new GFX.Vector3(...p).applyMatrix4(handle.matrixWorld));
+
+  /**
+   * It used to be three — a collar, a bar and a ring — and none of them quite
+   * met the next. However it is drawn, it is one casting.
+   */
+  it('is one piece', () => {
+    const parent = Array.from({ length: pos.count }, (_, i) => i);
+    const find = (i) => {
+      while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+      return i;
+    };
+    for (let t = 0; t < index.length; t += 3) {
+      parent[find(index[t + 1])] = find(index[t]);
+      parent[find(index[t + 2])] = find(index[t]);
+    }
+    const pieces = new Set(local.map((_, i) => find(i)));
+    assert.equal(pieces.size, 1, `the handle came out in ${pieces.size} pieces`);
+  });
+
+  it('runs into the wall of the pan, and not through it into the pan', () => {
+    const out = world.map((p) => Math.hypot(p.x, p.z));
+    assert.ok(Math.min(...out) < RIM_RADIUS - 0.1, 'the handle stops short of the rim');
+    assert.ok(Math.min(...out) > FLAT, 'the handle comes through into the pan');
+  });
+
+  it('is flat and wide, not a bar', () => {
+    const middle = local.filter(([, , s]) => s > 2.5 && s < 3.5);
+    const across = Math.max(...middle.map(([x]) => x)) - Math.min(...middle.map(([x]) => x));
+    const thick = Math.max(...middle.map(([, h]) => h)) - Math.min(...middle.map(([, h]) => h));
+    assert.ok(across > 1, `it is ${across.toFixed(2)} across`);
+    assert.ok(across > thick * 3, `${across.toFixed(2)} across is not flat over ${thick.toFixed(2)} thick`);
+  });
+
+  it('has a hole through the end to hang it by', () => {
+    const end = Math.max(...local.map(([, , s]) => s));
+    const hole = local.filter(([x, , s]) => Math.abs(x) < 0.2 && Math.abs(s - (end - 0.7)) < 0.15);
+    assert.equal(hole.length, 0, 'there is iron where the hole should be');
+    assert.ok(local.some(([x, , s]) => Math.abs(x) < 0.2 && s > end - 0.35), 'nothing closes the end off past the hole');
   });
 });

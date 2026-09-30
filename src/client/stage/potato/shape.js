@@ -70,6 +70,70 @@ export const EYE_DIRS = Object.freeze([
   [0.05, -0.86, 0.51], [0.52, 0.10, 0.85],
 ]);
 
+/**
+ * Each eye as the skin is cut to it: where it sits, which way is out, a frame
+ * in the skin turned a little further for every eye so they do not all lie the
+ * same way, and how big it is — a few millimetres across, life size.
+ */
+export const EYES = Object.freeze(EYE_DIRS.map((d, i) => {
+  const dir = normalize(d);
+  const normal = surfNormal(...dir);
+  const helper = Math.abs(normal[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const a = normalize(cross(normal, helper));
+  const b = cross(normal, a);
+  const turn = i * 1.13;
+  const c = Math.cos(turn), s = Math.sin(turn);
+  return Object.freeze({
+    at: surf(...dir),
+    normal,
+    along: [a[0] * c + b[0] * s, a[1] * c + b[1] * s, a[2] * c + b[2] * s],
+    across: [b[0] * c - a[0] * s, b[1] * c - a[1] * s, b[2] * c - a[2] * s],
+    size: (0.0013 + (i % 3) * 0.0004) * SCALE,
+  });
+}));
+
+const smoothstep = (a, b, v) => {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * What the eyes do to a point on the skin: an oval hollow sunk into it, and a
+ * crescent of brow raised round one end of the hollow.
+ *
+ * They are relief in the skin itself rather than pieces stuck on or under it.
+ * Pieces were what they used to be — a dark blob and a torus for the brow,
+ * mostly buried — and the one thing hiding them was the skin, so from inside
+ * the potato they were all there was to see.
+ *
+ * Writes the offset into out[0..2] and how deep in a hollow the point is, 0 to
+ * 1, into out[3], which is what the skin darkens by.
+ */
+export function eyeRelief(p, out = [0, 0, 0, 0]) {
+  out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
+  for (const eye of EYES) {
+    const qx = p[0] - eye.at[0], qy = p[1] - eye.at[1], qz = p[2] - eye.at[2];
+    const reach = eye.size * 3;
+    if (qx * qx + qy * qy + qz * qz > reach * reach) continue;
+
+    const { along: a, across: c } = eye;
+    const u = (qx * a[0] + qy * a[1] + qz * a[2]) / (eye.size * 1.7);
+    const v = (qx * c[0] + qy * c[1] + qz * c[2]) / (eye.size * 0.9);
+    const r = Math.hypot(u, v);
+
+    const hollow = r < 1 ? (1 - r * r) ** 2 : 0;
+    const end = smoothstep(-0.2, 0.75, -u / (r || 1));
+    const brow = Math.exp(-(((r - 1.35) / 0.3) ** 2)) * end;
+
+    const lift = eye.size * (0.5 * brow - 0.85 * hollow);
+    out[0] += eye.normal[0] * lift;
+    out[1] += eye.normal[1] * lift;
+    out[2] += eye.normal[2] * lift;
+    out[3] = Math.max(out[3], hollow);
+  }
+  return out;
+}
+
 function cross(a, b) {
   return [
     a[1] * b[2] - a[2] * b[1],

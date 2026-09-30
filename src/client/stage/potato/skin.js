@@ -33,7 +33,15 @@ export function paintSkin(GFX, geometry) {
   return attribute;
 }
 
-/** The mottled skin, a plain one for the eye ridges, and the hollows. */
+/**
+ * The mottled skin, and the flesh behind it.
+ *
+ * The flesh is unlit on purpose. It is only ever seen from inside, where none
+ * of the lights are, and a cut potato is one flat creamy white rather than a
+ * cave with the shape of the skin shaded into its walls. Both sides of it
+ * draw: it sits inside the skin, so from outside there is always skin in front
+ * of it, and from inside there is no way out through it anywhere.
+ */
 export function createSkinMaterials(GFX) {
   return {
     skin: new GFX.MeshStandardMaterial({
@@ -43,17 +51,10 @@ export function createSkinMaterials(GFX) {
       metalness: 0,
       vertexColors: true,
     }),
-    plain: new GFX.MeshStandardMaterial({
-      name: 'russet-skin-plain',
-      color: 0xa07348,
-      roughness: 1,
-      metalness: 0,
-    }),
-    eye: new GFX.MeshStandardMaterial({
-      name: 'eye-hollow',
-      color: 0x4a3116,
-      roughness: 1,
-      metalness: 0,
+    flesh: new GFX.MeshBasicMaterial({
+      name: 'potato-flesh',
+      color: 0xf1ead3,
+      side: GFX.DoubleSide,
     }),
   };
 }

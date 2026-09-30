@@ -176,6 +176,12 @@ themselves, and each reports how far it wanders while it talks.
 Both are scaled to the same height. An egg is naturally about twice a potato,
 which is fine when each has an app to itself.
 
+The potato is solid. His eyes are dimples in the skin rather than pieces buried
+under it, and a second copy of the skin, taken in a hair and left unlit, is his
+flesh: zoom in far enough for the camera or its near plane to get inside him and
+what is there is white potato, not the backs of his eyes. It is only drawn while
+the camera is that close.
+
 The debater is the origin of their spot, not the lectern: turning the two spots
 inward has to swing the lecterns across the front of them rather than swinging
 the debaters out into the wings. The lectern is then pushed forward by however
@@ -194,6 +200,13 @@ folded into, with a handle off the back. It is the floor and the backdrop at
 once — the wall closes the room off from every angle, which is what the
 cyclorama it replaced was for — and being solid iron from both sides rather
 than a one-sided wall, it is also something the camera can end up behind.
+
+The handle is the one part that is not turned. It is a flat tab the shape of a
+cast skillet's — flared where it leaves the wall, a waist, a rounded end with a
+teardrop hole — and it is cast into the rim in one piece, fillet and all:
+described as a distance field and meshed by
+[`src/client/stage/cast.js`](../src/client/stage/cast.js). A collar, a bar and a
+ring drawn from primitives never quite met, which is what it used to be.
 
 So the pan owns two rules about the shot, and
 [`test/client/pan.test.js`](../test/client/pan.test.js) is what says so. Both
