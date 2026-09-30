@@ -176,11 +176,11 @@ themselves, and each reports how far it wanders while it talks.
 Both are scaled to the same height. An egg is naturally about twice a potato,
 which is fine when each has an app to itself.
 
-The potato is solid. His eyes are dimples in the skin rather than pieces buried
-under it, and a second copy of the skin, taken in a hair and left unlit, is his
-flesh: zoom in far enough for the camera or its near plane to get inside him and
-what is there is white potato, not the backs of his eyes. It is only drawn while
-the camera is that close.
+Neither of them is solid — they are skins, drawn from outside — so the camera is
+kept out of both, however far it is zoomed or panned
+([`src/client/stage/keepout.js`](../src/client/stage/keepout.js)). It stops on an
+ellipsoid fenced round each body, which turns and walks with it, far enough out
+that the near plane does not slice into the skin either.
 
 The debater is the origin of their spot, not the lectern: turning the two spots
 inward has to swing the lecterns across the front of them rather than swinging

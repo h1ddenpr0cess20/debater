@@ -1,5 +1,6 @@
 import { buildEnvironment, dropShadows } from './environment.js';
 import { createEgg } from './egg/index.js';
+import { keepOut } from './keepout.js';
 import { buildPan, liftOverRim, polarOverRim } from './pan.js';
 import { createPodium, TOP } from './podium.js';
 import { createPotato } from './potato/index.js';
@@ -199,6 +200,14 @@ export function buildHall({ stage, GFX }) {
     });
     controls.update();
     capping = false;
+  });
+
+  /** And never into either of them — see `keepout.js`. */
+  keepOut({
+    GFX,
+    camera,
+    controls,
+    bodies: [potato.group.getObjectByName('tuber'), egg.group.getObjectByName('shell')],
   });
 
   frame();
