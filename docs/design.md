@@ -210,12 +210,12 @@ ring drawn from primitives never quite met, which is what it used to be.
 
 So the pan owns two rules about the shot, and
 [`test/client/pan.test.js`](../test/client/pan.test.js) is what says so. Both
-spots have to stand on the flat of it, off the roll. And the near rim may never
-come up between the camera and a debater's feet: fitting a wide set into a tall
-window walks the camera clean out of the pan, so the framing raises the shot
-until it sees over the rim, and how far down the shot may be dragged is capped
-by how far out it has been dragged. From inside the pan there is nothing in the
-way and the cap is the one the stage came with.
+spots have to stand on the flat of it, off the roll. And the near rim may not
+come up between the first shot and a debater's feet: fitting a wide set into a
+tall window walks the camera clean out of the pan, so the framing raises the
+shot until it sees over the rim. After that the camera is yours — it orbits all
+the way round and under the pan, and pulls back far enough to have the whole of
+it, handle and all, small in the frame.
 
 ## The server
 

@@ -91,16 +91,13 @@ export function liftOverRim({ points, dist, height }) {
 }
 
 /**
- * How far round a camera orbiting the set may be let, before the near rim comes
- * up between it and the debaters.
+ * How far down the first shot may be swung before the near rim comes up
+ * between it and the debaters.
  *
- * Dragging the shot down used to end up behind the cyclorama, which was drawn
- * on its inside face only and so was not there from behind. The pan is solid
- * iron from both sides, and a camera that ducks under the rim is looking at the
- * outside of a frying pan. So the swing is capped, at whatever the distance
- * makes room for: from inside the pan there is nothing in the way and the cap is
- * the one the stage came with, and it tightens as the camera backs out past the
- * rim.
+ * From inside the pan there is nothing in the way and the answer is the limit
+ * handed in; it tightens as the camera backs out past the rim. It used to cap
+ * the camera for good, which left a shot framed from outside the pan unable to
+ * be dragged down at all. It is only where the shot starts now.
  *
  * `radius` is how far out the far side of the set is, `target` how high the
  * camera is looking, and `limit` the cap to keep when the rim is not the thing

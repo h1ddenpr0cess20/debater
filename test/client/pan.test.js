@@ -99,7 +99,7 @@ describe('seeing over the rim', () => {
   });
 });
 
-describe('the swing the camera is allowed', () => {
+describe('the swing of the first shot', () => {
   const LIMIT = Math.PI * 0.495;
   const spread = Math.max(...corners.map((corner) => Math.hypot(corner.x, corner.z)));
   const cap = (dist) => polarOverRim({ dist, target: 1.05, radius: spread, limit: LIMIT });
@@ -108,9 +108,8 @@ describe('the swing the camera is allowed', () => {
     assert.equal(cap(3), LIMIT);
   });
 
-  /** Dragging the shot down used to end up outside, looking at cast iron. */
   it('stops short of the rim once the camera is out past it', () => {
-    assert.ok(cap(12) < LIMIT, 'the camera can still be dragged under the rim');
+    assert.ok(cap(12) < LIMIT, 'the first shot can start under the rim');
     assert.ok(cap(12) > 0.2, 'the camera can barely be moved at all');
   });
 
