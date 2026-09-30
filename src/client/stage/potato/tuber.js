@@ -13,10 +13,10 @@ const SEGMENTS = { width: 384, height: 256 };
  * The body, with the eyes parented to it: a dark hollow under a raised lip, and
  * the thing that reads as a potato rather than a stone.
  */
-export function createTuber(THREE, { segments = SEGMENTS } = {}) {
-  const materials = createSkinMaterials(THREE);
+export function createTuber(GFX, { segments = SEGMENTS } = {}) {
+  const materials = createSkinMaterials(GFX);
 
-  const geometry = new THREE.SphereGeometry(1, segments.width, segments.height);
+  const geometry = new GFX.SphereGeometry(1, segments.width, segments.height);
   const pos = geometry.attributes.position;
   const dirs = new Float32Array(pos.count * 3);
   const p = [0, 0, 0];
@@ -44,38 +44,38 @@ export function createTuber(THREE, { segments = SEGMENTS } = {}) {
   // The sphere's UVs mean nothing once the surface has moved this far, and the
   // colour rides on the vertices instead.
   geometry.deleteAttribute('uv');
-  paintSkin(THREE, geometry);
+  paintSkin(GFX, geometry);
 
   // The fat end and the flat belly pull the middle off the origin, which is
   // what everything downstream rocks and rolls around. The eyes come along.
   geometry.computeBoundingBox();
-  const offset = geometry.boundingBox.getCenter(new THREE.Vector3()).negate();
+  const offset = geometry.boundingBox.getCenter(new GFX.Vector3()).negate();
   geometry.translate(offset.x, offset.y, offset.z);
 
-  const mesh = new THREE.Mesh(geometry, materials.skin);
+  const mesh = new GFX.Mesh(geometry, materials.skin);
   mesh.name = 'tuber';
 
-  const divotGeo = new THREE.SphereGeometry(1, 24, 16);
-  const browGeo = new THREE.TorusGeometry(1, 0.34, 12, 28, Math.PI * 1.25);
-  const forward = new THREE.Vector3(0, 0, 1);
+  const divotGeo = new GFX.SphereGeometry(1, 24, 16);
+  const browGeo = new GFX.TorusGeometry(1, 0.34, 12, 28, Math.PI * 1.25);
+  const forward = new GFX.Vector3(0, 0, 1);
 
   EYE_DIRS.forEach((d, i) => {
-    const dir = new THREE.Vector3(...d).normalize();
+    const dir = new GFX.Vector3(...d).normalize();
     const scale = (0.0013 + (i % 3) * 0.0004) * SCALE;
 
-    const eye = new THREE.Group();
+    const eye = new GFX.Group();
     eye.name = `eye-${String(i + 1).padStart(2, '0')}`;
     eye.position.fromArray(surf(dir.x, dir.y, dir.z)).add(offset);
-    eye.quaternion.setFromUnitVectors(forward, new THREE.Vector3(...surfNormal(dir.x, dir.y, dir.z)));
+    eye.quaternion.setFromUnitVectors(forward, new GFX.Vector3(...surfNormal(dir.x, dir.y, dir.z)));
     eye.rotateZ(i * 1.13);
 
-    const divot = new THREE.Mesh(divotGeo, materials.eye);
+    const divot = new GFX.Mesh(divotGeo, materials.eye);
     divot.name = `${eye.name}-hollow`;
     divot.scale.set(scale * 1.7, scale * 0.9, scale * 1.6);
     divot.position.z = -scale * 1.35;
     eye.add(divot);
 
-    const brow = new THREE.Mesh(browGeo, materials.plain);
+    const brow = new GFX.Mesh(browGeo, materials.plain);
     brow.name = `${eye.name}-brow`;
     brow.scale.setScalar(scale * 2.0);
     brow.position.z = -scale * 2.6;
@@ -88,7 +88,7 @@ export function createTuber(THREE, { segments = SEGMENTS } = {}) {
   // The cross-section he stands on, measured off the body rather than the
   // half-extents it was cut from: it sets how far one step carries him, so the
   // walk stays in scale with whatever the shape comes out as.
-  const size = geometry.boundingBox.getSize(new THREE.Vector3());
+  const size = geometry.boundingBox.getSize(new GFX.Vector3());
   const radius = (size.y + size.z) / 4;
 
   return { mesh, geometry, materials, radius };

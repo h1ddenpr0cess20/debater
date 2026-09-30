@@ -1,5 +1,5 @@
 import './styles.css';
-import './vendor/three-d-stage.js';
+import './vendor/gfx/stage.js';
 
 import { fetchCatalog } from './api.js';
 import { createAudioBus } from './audio/bus.js';
@@ -14,16 +14,15 @@ import { createConnectorsPanel } from './ui/connectors.js';
 import { createControls } from './ui/controls.js';
 import { createHud } from './ui/hud.js';
 import { createMenu } from './ui/menu.js';
-import { stripStageChrome } from './ui/stage.js';
 import { createToolsPanel } from './ui/tools.js';
 import { createTranscriptPanel } from './ui/transcript.js';
 import { trackKeyboardInset } from './ui/viewport.js';
 
-const stage = stripStageChrome(document.querySelector('three-d-stage'));
-const { THREE } = await stage.ready;
+const stage = document.querySelector('three-d-stage');
+const { GFX } = await stage.ready;
 
 /** The hall, and the two rigs standing in it. Keyed the way the server keys them. */
-const hall = buildHall({ stage, THREE });
+const hall = buildHall({ stage, GFX });
 const rigs = { egg: hall.egg, potato: hall.potato };
 
 const hud = createHud();

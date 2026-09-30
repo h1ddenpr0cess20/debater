@@ -23,17 +23,17 @@ export const STEP_REACH = 0.22;
  */
 const STAND = -Math.PI / 2;
 
-export function createPotato({ THREE, shadow = null }) {
-  const tuber = createTuber(THREE);
+export function createPotato({ GFX, shadow = null }) {
+  const tuber = createTuber(GFX);
 
-  const tater = new THREE.Group();
+  const tater = new GFX.Group();
   tater.name = 'tater';
-  const spinner = new THREE.Group();
+  const spinner = new GFX.Group();
   spinner.name = 'spinner';
-  const body = new THREE.Group();
+  const body = new GFX.Group();
   body.name = 'body';
   // Under the squash, so the squash stays vertical while he tips over to think.
-  const stance = new THREE.Group();
+  const stance = new GFX.Group();
   stance.name = 'stance';
   stance.rotation.z = STAND * MOODS.idle.stand;
 
@@ -64,7 +64,7 @@ export function createPotato({ THREE, shadow = null }) {
   let rest = 0;
   let fidgetT = 2.4;
 
-  const timer = new THREE.Timer();
+  const timer = new GFX.Timer();
 
   tuber.mesh.onBeforeRender = () => {
     timer.update();

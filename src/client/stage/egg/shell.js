@@ -9,14 +9,14 @@ export function shapeEgg(positions) {
   return positions;
 }
 
-export function createShell(THREE, skin) {
-  const geometry = new THREE.SphereGeometry(1, 128, 96);
+export function createShell(GFX, skin) {
+  const geometry = new GFX.SphereGeometry(1, 128, 96);
   shapeEgg(geometry.attributes.position.array);
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshPhysicalMaterial({
+  const material = new GFX.MeshPhysicalMaterial({
     name: 'eggshell',
-    color: new THREE.Color(skin.map ? '#ffffff' : '#f0e3cd'),
+    color: new GFX.Color(skin.map ? '#ffffff' : '#f0e3cd'),
     map: skin.map,
     bumpMap: skin.bumpMap,
     bumpScale: 0.7,
@@ -25,10 +25,10 @@ export function createShell(THREE, skin) {
     clearcoat: 0.35,
     clearcoatRoughness: 0.6,
     sheen: 0.4,
-    sheenColor: new THREE.Color('#fff2dd'),
+    sheenColor: new GFX.Color('#fff2dd'),
   });
 
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new GFX.Mesh(geometry, material);
   mesh.name = 'shell';
 
   return { mesh, geometry, material };

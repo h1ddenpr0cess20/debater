@@ -59,25 +59,25 @@ const SWING = Math.PI * 0.495;
  * upright is a very different picture from a laptop, and both have to hold both
  * lecterns.
  */
-export function buildHall({ stage, THREE }) {
-  buildEnvironment({ stage, THREE });
+export function buildHall({ stage, GFX }) {
+  buildEnvironment({ stage, GFX });
 
-  const hall = new THREE.Group();
+  const hall = new GFX.Group();
   hall.name = 'hall';
-  hall.add(buildPan(THREE));
+  hall.add(buildPan(GFX));
 
-  const left = createPodium(THREE, { name: 'podium-left', accent: ACCENT.left });
+  const left = createPodium(GFX, { name: 'podium-left', accent: ACCENT.left });
   left.group.position.x = -REACH;
   left.group.rotation.y = TOE_IN;
 
-  const right = createPodium(THREE, { name: 'podium-right', accent: ACCENT.right });
+  const right = createPodium(GFX, { name: 'podium-right', accent: ACCENT.right });
   right.group.position.x = REACH;
   right.group.rotation.y = -TOE_IN;
 
   hall.add(left.group, right.group);
 
-  const potato = left.stand(createPotato({ THREE, shadow: left.blot }));
-  const egg = right.stand(createEgg({ THREE, shadow: right.blot }));
+  const potato = left.stand(createPotato({ GFX, shadow: left.blot }));
+  const egg = right.stand(createEgg({ GFX, shadow: right.blot }));
 
   /**
    * Both lecterns end up as far forward as the roomier of the two debaters
@@ -99,20 +99,20 @@ export function buildHall({ stage, THREE }) {
    * The two lecterns and whoever is standing on them — not the pan, which is
    * scenery and would frame the shot on nothing.
    */
-  const set = new THREE.Box3()
+  const set = new GFX.Box3()
     .setFromObject(left.group)
-    .union(new THREE.Box3().setFromObject(right.group));
-  const middle = set.getCenter(new THREE.Vector3());
-  const span = set.getSize(new THREE.Vector3());
+    .union(new GFX.Box3().setFromObject(right.group));
+  const middle = set.getCenter(new GFX.Vector3());
+  const span = set.getSize(new GFX.Vector3());
 
   /** Every corner of the set. What has to be on screen, all of it, always. */
-  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new GFX.Vector3(
     i & 1 ? set.max.x : set.min.x,
     i & 2 ? set.max.y : set.min.y,
     i & 4 ? set.max.z : set.min.z,
   ));
 
-  const scratch = new THREE.Vector3();
+  const scratch = new GFX.Vector3();
 
   function place(dist) {
     /**

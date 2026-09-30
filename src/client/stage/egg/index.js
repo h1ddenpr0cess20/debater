@@ -17,15 +17,15 @@ export const ROLL_REACH = 0.22;
  * where he stands — this returns the group to hang off a podium, and the three
  * handles the debate drives him by.
  */
-export function createEgg({ THREE, shadow = null }) {
-  const skin = createShellSkin(THREE);
-  const shell = createShell(THREE, skin);
+export function createEgg({ GFX, shadow = null }) {
+  const skin = createShellSkin(GFX);
+  const shell = createShell(GFX, skin);
 
-  const marc = new THREE.Group();
+  const marc = new GFX.Group();
   marc.name = 'marc';
-  const spinner = new THREE.Group();
+  const spinner = new GFX.Group();
   spinner.name = 'spinner';
-  const body = new THREE.Group();
+  const body = new GFX.Group();
   body.name = 'body';
 
   marc.add(spinner);
@@ -56,7 +56,7 @@ export function createEgg({ THREE, shadow = null }) {
   let rest = 0;
   let fidgetT = 2.4;
 
-  const timer = new THREE.Timer();
+  const timer = new GFX.Timer();
 
   shell.mesh.onBeforeRender = () => {
     timer.update();

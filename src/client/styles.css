@@ -36,7 +36,7 @@ three-d-stage:not(:defined) { visibility: hidden; }
 three-d-stage {
   position: fixed;
   inset: 0;
-  /** Explicit, not `auto`: everything else is layered over this, and a WebGL
+  /** Explicit, not `auto`: everything else is layered over this, and a GPU
    *  canvas composites on its own and will happily come out on top of an
    *  overlay whose order was left to be worked out. */
   z-index: 0;

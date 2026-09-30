@@ -1,7 +1,7 @@
 import { vnoise } from './noise.js';
 
 /**
- * The tuber surface, as plain numbers — no three.js, so it can be checked
+ * The tuber surface, as plain numbers — no GFX, so it can be checked
  * without a renderer. Drawn life size (a russet about 156 mm end to end) and
  * scaled once here to the units the rig is written in.
  */

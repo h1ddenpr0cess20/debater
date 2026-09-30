@@ -6,7 +6,7 @@
  * turns, and the rigs draw a soft blot on the slab under themselves instead —
  * see `podium.js`.
  */
-export function buildEnvironment({ stage, THREE }) {
+export function buildEnvironment({ stage, GFX }) {
   try {
     const c = document.createElement('canvas');
     c.width = 64; c.height = 32;
@@ -17,11 +17,11 @@ export function buildEnvironment({ stage, THREE }) {
     ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 32);
     ctx.fillStyle = 'rgba(255,247,232,0.95)'; ctx.beginPath();
     ctx.ellipse(20, 6, 12, 5, 0, 0, Math.PI * 2); ctx.fill();
-    const tex = new THREE.Texture(c);
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
+    const tex = new GFX.Texture(c);
+    tex.mapping = GFX.EquirectangularReflectionMapping;
+    tex.colorSpace = GFX.SRGBColorSpace;
     tex.needsUpdate = true;
-    const pmrem = new THREE.PMREMGenerator(stage._renderer);
+    const pmrem = new GFX.PMREMGenerator(stage._renderer);
     stage._scene.environment = pmrem.fromEquirectangular(tex).texture;
     pmrem.dispose(); tex.dispose();
 
@@ -41,11 +41,11 @@ export function buildEnvironment({ stage, THREE }) {
     for (const light of fills) light.intensity = 0.28;
     if (stage._key) stage._key.intensity = 0.5;
 
-    const ambient = new THREE.AmbientLight(0xfff3e4, 0.5);
+    const ambient = new GFX.AmbientLight(0xfff3e4, 0.5);
     ambient.name = 'hall-ambient';
     stage._scene.add(ambient);
 
-    const counter = new THREE.DirectionalLight(0xffeeda, 0.28);
+    const counter = new GFX.DirectionalLight(0xffeeda, 0.28);
     counter.name = 'hall-counter-fill';
     counter.position.set(-5, 2.5, 4);
     stage._scene.add(counter);
@@ -53,7 +53,7 @@ export function buildEnvironment({ stage, THREE }) {
     /** One warm lamp over each lectern, so the podiums are not flat slabs. High
      *  and dim: close enough to blow out a pale shell is close enough to see. */
     for (const x of [-1.8, 1.8]) {
-      const lamp = new THREE.PointLight(0xffe9cc, 3.2, 12, 2);
+      const lamp = new GFX.PointLight(0xffe9cc, 3.2, 12, 2);
       lamp.name = `hall-lamp-${x < 0 ? 'left' : 'right'}`;
       lamp.position.set(x, 4.6, 2.2);
       stage._scene.add(lamp);

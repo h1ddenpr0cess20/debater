@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import * as THREE from 'three';
+import * as GFX from '../../src/client/vendor/gfx/index.js';
 
 import { createEgg } from '../../src/client/stage/egg/index.js';
 import { REACH, TOE_IN } from '../../src/client/stage/index.js';
@@ -22,15 +22,15 @@ import { createPotato } from '../../src/client/stage/potato/index.js';
 
 /** The two spots, placed the way `buildHall` places them. */
 function set() {
-  const left = createPodium(THREE, { name: 'left' });
+  const left = createPodium(GFX, { name: 'left' });
   left.group.position.x = -REACH;
   left.group.rotation.y = TOE_IN;
-  left.stand(createPotato({ THREE, shadow: left.blot }));
+  left.stand(createPotato({ GFX, shadow: left.blot }));
 
-  const right = createPodium(THREE, { name: 'right' });
+  const right = createPodium(GFX, { name: 'right' });
   right.group.position.x = REACH;
   right.group.rotation.y = -TOE_IN;
-  right.stand(createEgg({ THREE, shadow: right.blot }));
+  right.stand(createEgg({ GFX, shadow: right.blot }));
 
   const ahead = Math.max(left.lectern.position.z, right.lectern.position.z);
   left.lectern.position.z = ahead;
@@ -39,10 +39,10 @@ function set() {
   left.group.updateWorldMatrix(false, true);
   right.group.updateWorldMatrix(false, true);
 
-  const box = new THREE.Box3()
+  const box = new GFX.Box3()
     .setFromObject(left.group)
-    .union(new THREE.Box3().setFromObject(right.group));
-  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(
+    .union(new GFX.Box3().setFromObject(right.group));
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new GFX.Vector3(
     i & 1 ? box.max.x : box.min.x,
     i & 2 ? box.max.y : box.min.y,
     i & 4 ? box.max.z : box.min.z,

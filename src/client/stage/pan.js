@@ -134,11 +134,11 @@ export function polarOverRim({ dist, target, radius, limit }) {
  * and the wall rolls over into the rim — and a cast body with a sharp corner in
  * it looks pressed out of sheet.
  */
-function arc(THREE, cx, cy, r, from, to, steps = 8) {
+function arc(GFX, cx, cy, r, from, to, steps = 8) {
   const out = [];
   for (let i = 0; i <= steps; i += 1) {
     const a = from + ((to - from) * i) / steps;
-    out.push(new THREE.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
+    out.push(new GFX.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
   }
   return out;
 }
@@ -147,7 +147,7 @@ function arc(THREE, cx, cy, r, from, to, steps = 8) {
  * The seasoned surface: near black, worn paler in the middle where a pan gets
  * used, with the faint concentric rings a lathe-turned base is left with.
  */
-function cookTexture(THREE) {
+function cookTexture(GFX) {
   const c = document.createElement('canvas');
   c.width = c.height = 512;
   const ctx = c.getContext('2d');
@@ -169,8 +169,8 @@ function cookTexture(THREE) {
     ctx.stroke();
   }
 
-  const map = new THREE.CanvasTexture(c);
-  map.colorSpace = THREE.SRGBColorSpace;
+  const map = new GFX.CanvasTexture(c);
+  map.colorSpace = GFX.SRGBColorSpace;
   return map;
 }
 
@@ -182,15 +182,15 @@ function cookTexture(THREE) {
  * of the stage, and a bar across one debater and not the other reads as a
  * lopsided set rather than as a pan.
  */
-function buildHandle(THREE, iron) {
-  const handle = new THREE.Group();
+function buildHandle(GFX, iron) {
+  const handle = new GFX.Group();
   handle.name = 'pan-handle';
 
   const LENGTH = 4.8;
   const TILT = 0.3;
 
   /** The collar the handle is cast into, which sits on the outside of the rim. */
-  const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.44, 0.9, 16, 1, false), iron);
+  const socket = new GFX.Mesh(new GFX.CylinderGeometry(0.62, 0.44, 0.9, 16, 1, false), iron);
   socket.name = 'pan-handle-socket';
   socket.rotation.x = Math.PI / 2 - 0.5;
   socket.position.set(0, RIM_HEIGHT - 0.55, -RIM_RADIUS);
@@ -198,7 +198,7 @@ function buildHandle(THREE, iron) {
   handle.add(socket);
 
   /** Oval in section: taller than it is wide, which is what a cast bar is. */
-  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, LENGTH, 14, 1, false), iron);
+  const bar = new GFX.Mesh(new GFX.CylinderGeometry(0.22, 0.34, LENGTH, 14, 1, false), iron);
   bar.name = 'pan-handle-bar';
   bar.rotation.x = Math.PI / 2 + TILT;
   bar.scale.set(0.62, 1, 1);
@@ -209,7 +209,7 @@ function buildHandle(THREE, iron) {
   );
   handle.add(bar);
 
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.11, 10, 24), iron);
+  const ring = new GFX.Mesh(new GFX.TorusGeometry(0.34, 0.11, 10, 24), iron);
   ring.name = 'pan-handle-ring';
   ring.position.set(
     0,
@@ -227,16 +227,16 @@ function buildHandle(THREE, iron) {
  * Builds the pan and hands it back as one group, base at y = 0 so a debater
  * standing at the origin is standing in it.
  */
-export function buildPan(THREE) {
-  const pan = new THREE.Group();
+export function buildPan(GFX) {
+  const pan = new GFX.Group();
   pan.name = 'pan';
 
-  const iron = new THREE.MeshStandardMaterial({
+  const iron = new GFX.MeshStandardMaterial({
     name: 'pan-iron',
     color: 0x17130f,
     roughness: 0.42,
     metalness: 0.72,
-    side: THREE.DoubleSide,
+    side: GFX.DoubleSide,
   });
 
   /**
@@ -253,20 +253,20 @@ export function buildPan(THREE) {
   const lip = { x: RIM_RADIUS - bead, y: RIM_HEIGHT - bead };
 
   const profile = [
-    new THREE.Vector2(0, 0),
-    new THREE.Vector2(cx, 0),
+    new GFX.Vector2(0, 0),
+    new GFX.Vector2(cx, 0),
     /** Inside: the base rolls up into the wall, and the wall flares to the lip. */
-    ...arc(THREE, cx, cy, CORNER, -Math.PI / 2, knee),
-    new THREE.Vector2(lip.x - bead * 0.2, lip.y - 0.02),
+    ...arc(GFX, cx, cy, CORNER, -Math.PI / 2, knee),
+    new GFX.Vector2(lip.x - bead * 0.2, lip.y - 0.02),
     /** Over the top and back down the outside. */
-    ...arc(THREE, lip.x, lip.y, bead, Math.PI, 0, 12),
+    ...arc(GFX, lip.x, lip.y, bead, Math.PI, 0, 12),
     /** Outside: the same body, offset by however thick the iron is. */
-    new THREE.Vector2(cx + Math.cos(knee) * (CORNER + IRON), cy + Math.sin(knee) * (CORNER + IRON)),
-    ...arc(THREE, cx, cy, CORNER + IRON, knee, -Math.PI / 2),
-    new THREE.Vector2(0, -IRON),
+    new GFX.Vector2(cx + Math.cos(knee) * (CORNER + IRON), cy + Math.sin(knee) * (CORNER + IRON)),
+    ...arc(GFX, cx, cy, CORNER + IRON, knee, -Math.PI / 2),
+    new GFX.Vector2(0, -IRON),
   ];
 
-  const body = new THREE.Mesh(new THREE.LatheGeometry(profile, 72), iron);
+  const body = new GFX.Mesh(new GFX.LatheGeometry(profile, 72), iron);
   body.name = 'pan-body';
   pan.add(body);
 
@@ -275,11 +275,11 @@ export function buildPan(THREE) {
    * because it is the one part that is worn rather than cast, and because it is
    * the floor: it is what the blots under the two of them fall on.
    */
-  const surface = new THREE.Mesh(
-    new THREE.CircleGeometry(FLAT + 0.25, 96),
-    new THREE.MeshStandardMaterial({
+  const surface = new GFX.Mesh(
+    new GFX.CircleGeometry(FLAT + 0.25, 96),
+    new GFX.MeshStandardMaterial({
       name: 'pan-surface',
-      map: cookTexture(THREE),
+      map: cookTexture(GFX),
       roughness: 0.44,
       metalness: 0.62,
     }),
@@ -289,7 +289,7 @@ export function buildPan(THREE) {
   surface.position.y = 0.002;
   pan.add(surface);
 
-  pan.add(buildHandle(THREE, iron));
+  pan.add(buildHandle(GFX, iron));
 
   return pan;
 }
