@@ -29,8 +29,10 @@ const ARENA_SIZE = 4 << 20;
 const ALIGN = 256;
 
 const LOCATIONS = { position: 0, normal: 1, uv: 2, color: 3 };
-const U = GPUBufferUsage;
-const T = GPUTextureUsage;
+// The WebGPU flags, by the values the spec gives them: a browser without WebGPU (Firefox, for one) has no GPUBufferUsage
+// and the like, and reading them here would throw as the module loads, before the renderer could fall back to WebGL.
+const U = globalThis.GPUBufferUsage ?? { MAP_READ: 1, MAP_WRITE: 2, COPY_SRC: 4, COPY_DST: 8, INDEX: 16, VERTEX: 32, UNIFORM: 64, STORAGE: 128, INDIRECT: 256, QUERY_RESOLVE: 512 };
+const T = globalThis.GPUTextureUsage ?? { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, STORAGE_BINDING: 8, RENDER_ATTACHMENT: 16 };
 
 /** OpenGL clip space (z in −1..1) to WebGPU's (z in 0..1), optionally upside down. */
 function toWebGPUProjection(m, flipY) {
